@@ -62,10 +62,6 @@ function getLabelFromItemJson(itemJson, lang = 'en') {
   );
 }
 
-function generateSimpleSubclassQuery(rootQid) {
-  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
-}
-
 // Helper: Generate SPARQL query for all ancestors (reverse P279 tree)
 function generateSimpleSuperclassQuery(rootQid) {
   return `SELECT DISTINCT ?i WHERE { ?i (wdt:P279/wdt:P279*) wd:${rootQid} }`;
@@ -179,7 +175,7 @@ function getLabelFromPropertyJson(propertyJson, lang = 'en') {
 
 // Helper: Generate simple SPARQL query for all descendants (P279 or P31)
 function generateSimpleSubclassOrInstanceQuery(rootQid) {
-  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279|wdt:P31)+ ?i }`;
+  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
 }
 
 // Helper: Retry with exponential backoff for 429s
@@ -230,9 +226,9 @@ async function fetchWikidataPropertyJsonMemo(pid) {
 function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
-  // Change these to try different queries
-  const rootQid = 'Q144'; // dog
-  const maxDepth = 7;
+  const [rootQid, setRootQid] = useState('Q144'); // root QID, default Q144
+  const [inputQid, setInputQid] = useState('Q144'); // for the input box
+
   useEffect(() => {
     async function fetchData() {
       // 1. Get all descendants (P279/P31) and all ancestors (reverse P279)
@@ -352,16 +348,45 @@ function App() {
       setLayoutKey(prev => prev + 1);
     }
     fetchData();
-  }, [rootQid, maxDepth]);
+  }, [rootQid]);
+
+  // Handler for input box
+  function handleInputChange(e) {
+    setInputQid(e.target.value);
+  }
+  function handleInputKeyDown(e) {
+    if (e.key === 'Enter') {
+      const trimmed = inputQid.trim();
+      if (/^Q\\d+$/.test(trimmed)) {
+        setRootQid(trimmed);
+      }
+    }
+  }
+
   return (
-    <div className="App" style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, background: '#fafafa' }}>
-      <CytoscapeComponent
-        key={layoutKey}
-        elements={elements}
-        layout={layout}
-        stylesheet={stylesheet}
-        style={{ width: '100vw', height: '100vh', background: '#fafafa' }}
-      />
+    <div className="App" style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '12px 16px 8px 16px', background: '#f0f0f0', borderBottom: '1px solid #ddd', display: 'flex', alignItems: 'center', zIndex: 2 }}>
+        <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>Root QID:</label>
+        <input
+          id="qid-input"
+          type="text"
+          value={inputQid}
+          onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
+          style={{ fontSize: 18, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: 120 }}
+          placeholder="Q144"
+        />
+        <span style={{ marginLeft: 12, color: '#888', fontSize: 14 }}>Press Enter to update</span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <CytoscapeComponent
+          key={layoutKey}
+          elements={elements}
+          layout={layout}
+          stylesheet={stylesheet}
+          style={{ width: '100vw', height: '100%', background: '#fafafa' }}
+        />
+      </div>
     </div>
   );
 }
