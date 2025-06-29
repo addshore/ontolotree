@@ -16,16 +16,13 @@ function getCommonsFilename(url) {
   let match = url.match(/Special:FilePath\/(.+)$/);
   if (match) {
     const filename = decodeURIComponent(match[1]).replace(/ /g, '_');
-    console.log('getCommonsFilename (Special:FilePath):', filename);
     return filename;
   }
   match = url.match(/File:(.+)$/);
   if (match) {
     const filename = decodeURIComponent(match[1]).replace(/ /g, '_');
-    console.log('getCommonsFilename (File:):', filename);
     return filename;
   }
-  console.log('getCommonsFilename: null');
   return null;
 }
 
@@ -70,72 +67,6 @@ function generateSubclassTreeQueryNoImages(rootQid, maxDepth) {
   return `SELECT ?value ?valueLabel ?depth ?parent ?parentLabel WHERE {\n${unions.join('\n  UNION')}\n  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],mul,en". }\n}\nORDER BY ?depth`;
 }
 
-function sparqlResultsToElements(results, rootQid = 'Q144') {
-  const nodes = {};
-  const edgeSet = new Set();
-  const edges = [];
-  let rootLabel = rootQid;
-  results.forEach(row => {
-    const qid = getQidFromUri(row.value.value);
-    const parentQid = getQidFromUri(row.parent.value);
-    const label = row.valueLabel?.value || qid;
-    const parentLabel = row.parentLabel?.value || parentQid;
-    const valueItemJson = row.valueItemJson;
-    const parentItemJson = row.parentItemJson;
-    const valueImg = getImageFilenameFromItemJson(valueItemJson);
-    const parentImg = getImageFilenameFromItemJson(parentItemJson);
-    if (!nodes[qid]) {
-      nodes[qid] = {
-        data: {
-          id: qid,
-          label: qid + ": " + label,
-          qid,
-          img: valueImg ? commonsDirectUrl('File:' + valueImg) : undefined,
-          itemJson: valueItemJson
-        }
-      };
-      if (qid === rootQid) rootLabel = label;
-      console.log('Add node:', nodes[qid]);
-    }
-    if (!nodes[parentQid]) {
-      nodes[parentQid] = {
-        data: {
-          id: parentQid,
-          label: parentQid + ": " + parentLabel,
-          qid: parentQid,
-          img: parentImg ? commonsDirectUrl('File:' + parentImg) : undefined,
-          itemJson: parentItemJson
-        }
-      };
-      if (parentQid === rootQid) rootLabel = parentLabel;
-      console.log('Add parent node:', nodes[parentQid]);
-    } else if (parentImg && !nodes[parentQid].data.img) {
-      nodes[parentQid].data.img = commonsDirectUrl('File:' + parentImg);
-    }
-    const edgeKey = `${parentQid}->${qid}`;
-    if (!edgeSet.has(edgeKey)) {
-      const edge = { data: { source: parentQid, target: qid } };
-      edges.push(edge);
-      edgeSet.add(edgeKey);
-      console.log('Add edge:', edge);
-    }
-  });
-  if (!nodes[rootQid]) {
-    nodes[rootQid] = {
-      data: {
-        id: rootQid,
-        label: rootLabel,
-        qid: rootQid,
-        img: undefined
-      }
-    };
-    console.log('Add explicit root node:', nodes[rootQid]);
-  }
-  console.log('Final nodes:', Object.values(nodes));
-  console.log('Final edges:', edges);
-  return [...Object.values(nodes), ...edges];
-}
-
 const layout = {
   name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
 
@@ -158,7 +89,6 @@ const layout = {
   stop: undefined, // callback on layoutstop
   transform: function (node, position ){ return position; } // transform a given node position. Useful for changing flow direction in discrete layouts0
 };
-
 const stylesheet = [
   {
     selector: 'node[img]',
@@ -181,8 +111,15 @@ const stylesheet = [
       'width': 80,
       'height': 80,
       'border-width': 6,
-      'border-color': ele => ele.data('id') === 'dog' ? '#ff6600' : '#888',
+      'border-color': '#888',
       'shape': 'ellipse',
+    }
+  },
+  {
+    selector: 'node[type = "root"]',
+    style: {
+      'border-color': 'green',
+      'border-width': 8
     }
   },
   {
@@ -210,15 +147,6 @@ function App() {
   // Change these to try different queries
   const rootQid = 'Q144'; // dog
   const maxDepth = 5;
-  // Always include Q144 as a node
-  const rootNode = React.useMemo(() => ({
-    data: {
-      id: rootQid,
-      label: rootQid + ': Dog', // TODO: look up from API if needed
-      qid: rootQid,
-      // img: '#' // will be filled in after REST fetch
-    }
-  }), [rootQid]);
   useEffect(() => {
     async function fetchData() {
       // 1. Get subclass tree (no images) from SPARQL
@@ -252,7 +180,21 @@ function App() {
       const nodes = {};
       const edgeSet = new Set();
       const edges = [];
-      let rootLabel = rootQid;
+      if (!nodes[rootQid]) {
+        const rootItemJson = qidToItemJson[rootQid];
+        const rootImg = getImageFilenameFromItemJson(rootItemJson);
+        const rootLabel = rootItemJson?.labels?.en || "";
+        nodes[rootQid] = {
+          data: {
+            id: rootQid,
+            label: rootQid + ": " + rootLabel,
+            img: rootImg ? commonsDirectUrl('File:' + rootImg) : undefined,
+            itemJson: rootItemJson,
+            type: "root" // Add a flag to indicate this is the root node
+          }
+        };
+      }
+
       data.results.bindings.forEach(row => {
         const qid = getQidFromUri(row.value.value);
         const parentQid = getQidFromUri(row.parent.value);
@@ -272,19 +214,16 @@ function App() {
               itemJson: valueItemJson
             }
           };
-          if (qid === rootQid) rootLabel = label;
         }
         if (!nodes[parentQid]) {
           nodes[parentQid] = {
             data: {
               id: parentQid,
               label: parentQid + ": " + parentLabel,
-              qid: parentQid,
               img: parentImg ? commonsDirectUrl('File:' + parentImg) : undefined,
               itemJson: parentItemJson
             }
           };
-          if (parentQid === rootQid) rootLabel = parentLabel;
         } else if (parentImg && !nodes[parentQid].data.img) {
           nodes[parentQid].data.img = commonsDirectUrl('File:' + parentImg);
         }
@@ -295,25 +234,18 @@ function App() {
           edgeSet.add(edgeKey);
         }
       });
-      if (!nodes[rootQid]) {
-        const rootItemJson = qidToItemJson[rootQid];
-        const rootImg = getImageFilenameFromItemJson(rootItemJson);
-        nodes[rootQid] = {
-          data: {
-            id: rootQid,
-            label: rootLabel,
-            qid: rootQid,
-            img: rootImg ? commonsDirectUrl('File:' + rootImg) : undefined,
-            itemJson: rootItemJson
-          }
-        };
-      }
       const allNodes = Object.values(nodes);
+      // Find the root node, and add an attribute to indicate it's the root
+      const rootNode = allNodes.find(node => node.data.id === rootQid);
+      if (rootNode) {
+        rootNode.data.type = "root"; // Add a flag to indicate this is the root node
+      }
+
       setElements([...allNodes, ...edges]);
-      setLayoutKey(prev => prev + 1);
+      setLayoutKey(prev => prev + 1); // force layout refresh
     }
     fetchData();
-  }, [rootQid, maxDepth, rootNode]);
+  }, [rootQid, maxDepth]);
   return (
     <div className="App" style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, background: '#fafafa' }}>
       <CytoscapeComponent
