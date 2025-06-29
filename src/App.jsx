@@ -77,6 +77,11 @@ function generateSubclassTreeQueryNoLabels(rootQid, maxDepth) {
   return `SELECT ?value ?depth ?parent WHERE {\n${unions.join('\n  UNION')}\n}`;
 }
 
+// Helper: Generate simple SPARQL query for all descendants
+function generateSimpleSubclassQuery(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
+}
+
 const layout = {
   name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
 
@@ -156,11 +161,11 @@ function App() {
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
   // Change these to try different queries
   const rootQid = 'Q144'; // dog
-  const maxDepth = 5;
+  const maxDepth = 7;
   useEffect(() => {
     async function fetchData() {
-      // 1. Get subclass tree (no images, no labels) from SPARQL
-      const query = generateSubclassTreeQueryNoLabels(rootQid, maxDepth);
+      // 1. Get all descendants (no parent info) from SPARQL
+      const query = generateSimpleSubclassQuery(rootQid);
       const res = await fetch('https://query.wikidata.org/sparql', {
         method: 'POST',
         headers: {
@@ -170,11 +175,10 @@ function App() {
         body: new URLSearchParams({ query }),
       });
       const data = await res.json();
-      // 2. Collect all QIDs (value and parent)
+      // 2. Collect all QIDs (descendants + root)
       const qids = new Set();
       data.results.bindings.forEach(row => {
-        if (row.value?.value) qids.add(getQidFromUri(row.value.value));
-        if (row.parent?.value) qids.add(getQidFromUri(row.parent.value));
+        if (row.i?.value) qids.add(getQidFromUri(row.i.value));
       });
       qids.add(rootQid);
       // 3. Fetch all item JSONs in parallel
@@ -186,70 +190,41 @@ function App() {
           console.warn('Failed to fetch item JSON for', qid, e);
         }
       }));
-      // 4. Build nodes and edges, using JSON for labels
+      // 4. Build nodes and edges using P279 claims from JSON
       const nodes = {};
       const edgeSet = new Set();
       const edges = [];
-      if (!nodes[rootQid]) {
-        const rootItemJson = qidToItemJson[rootQid];
-        const rootImg = getImageFilenameFromItemJson(rootItemJson);
-        const rootLabel = getLabelFromItemJson(rootItemJson) || rootQid;
-        nodes[rootQid] = {
+      // Add all nodes
+      for (const qid of qids) {
+        const itemJson = qidToItemJson[qid];
+        const label = getLabelFromItemJson(itemJson) || qid;
+        const img = getImageFilenameFromItemJson(itemJson);
+        nodes[qid] = {
           data: {
-            id: rootQid,
-            label: rootQid + ": " + rootLabel,
-            img: rootImg ? commonsDirectUrl('File:' + rootImg) : undefined,
-            itemJson: rootItemJson,
-            type: "root"
+            id: qid,
+            label: qid + ': ' + label,
+            img: img ? commonsDirectUrl('File:' + img) : undefined,
+            itemJson,
+            type: qid === rootQid ? 'root' : undefined
           }
         };
       }
-      data.results.bindings.forEach(row => {
-        const qid = getQidFromUri(row.value.value);
-        const parentQid = getQidFromUri(row.parent.value);
-        const valueItemJson = qidToItemJson[qid];
-        const parentItemJson = qidToItemJson[parentQid];
-        const valueLabel = getLabelFromItemJson(valueItemJson) || qid;
-        const parentLabel = getLabelFromItemJson(parentItemJson) || parentQid;
-        const valueImg = getImageFilenameFromItemJson(valueItemJson);
-        const parentImg = getImageFilenameFromItemJson(parentItemJson);
-        if (!nodes[qid]) {
-          nodes[qid] = {
-            data: {
-              id: qid,
-              label: qid + ": " + valueLabel,
-              qid,
-              img: valueImg ? commonsDirectUrl('File:' + valueImg) : undefined,
-              itemJson: valueItemJson
+      // Add edges based on P279 claims
+      for (const qid of qids) {
+        const itemJson = qidToItemJson[qid];
+        const p279s = itemJson?.statements?.P279 || [];
+        for (const claim of p279s) {
+          const parentQid = claim.value?.content;
+          if (parentQid && qids.has(parentQid)) {
+            const edgeKey = `${parentQid}->${qid}`;
+            if (!edgeSet.has(edgeKey)) {
+              edges.push({ data: { source: parentQid, target: qid } });
+              edgeSet.add(edgeKey);
             }
-          };
+          }
         }
-        if (!nodes[parentQid]) {
-          nodes[parentQid] = {
-            data: {
-              id: parentQid,
-              label: parentQid + ": " + parentLabel,
-              img: parentImg ? commonsDirectUrl('File:' + parentImg) : undefined,
-              itemJson: parentItemJson
-            }
-          };
-        } else if (parentImg && !nodes[parentQid].data.img) {
-          nodes[parentQid].data.img = commonsDirectUrl('File:' + parentImg);
-        }
-        const edgeKey = `${parentQid}->${qid}`;
-        if (!edgeSet.has(edgeKey)) {
-          const edge = { data: { source: parentQid, target: qid } };
-          edges.push(edge);
-          edgeSet.add(edgeKey);
-        }
-      });
-      const allNodes = Object.values(nodes);
-      // Find the root node, and add an attribute to indicate it's the root
-      const rootNode = allNodes.find(node => node.data.id === rootQid);
-      if (rootNode) {
-        rootNode.data.type = "root";
       }
-      setElements([...allNodes, ...edges]);
+      setElements([...Object.values(nodes), ...edges]);
       setLayoutKey(prev => prev + 1);
     }
     fetchData();
