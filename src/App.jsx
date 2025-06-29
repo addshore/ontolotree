@@ -61,23 +61,6 @@ function getLabelFromItemJson(itemJson, lang = 'en') {
   );
 }
 
-// Helper: Generate SPARQL query for subclass tree (no images, no label service)
-function generateSubclassTreeQueryNoLabels(rootQid, maxDepth) {
-  const unions = [];
-  for (let depth = 1; depth <= maxDepth; depth++) {
-    const path = Array(depth).fill('wdt:P279').join('/');
-    let parentPattern;
-    if (depth === 1) {
-      parentPattern = `BIND(wd:${rootQid} AS ?parent)`;
-    } else {
-      parentPattern = `?parent wdt:P279 ?value .\n    FILTER EXISTS { wd:${rootQid} ${Array(depth-1).fill('wdt:P279').join('/')} ?parent }`;
-    }
-    unions.push(`\n  {\n    wd:${rootQid} ${path} ?value .\n    BIND(${depth} AS ?depth)\n    ${parentPattern}\n  }`);
-  }
-  return `SELECT ?value ?depth ?parent WHERE {\n${unions.join('\n  UNION')}\n}`;
-}
-
-// Helper: Generate simple SPARQL query for all descendants
 function generateSimpleSubclassQuery(rootQid) {
   return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
 }
@@ -86,10 +69,10 @@ const layout = {
   name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
 
   fit: true, // whether to fit the viewport to the graph
-  directed: false, // whether the tree is directed downwards (or edges can point in any direction if false)
+  directed: true, // whether the tree is directed downwards (or edges can point in any direction if false)
   padding: 30, // padding on fit
   circle: false, // put depths in concentric circles if true, put depths top down if false
-  grid: false, // whether to create an even grid into which the DAG is placed (circle:false only)
+  grid: true, // whether to create an even grid into which the DAG is placed (circle:false only)
   spacingFactor: 1.75, // positive spacing factor, larger => more space between nodes (N.B. n/a if causes overlap)
   boundingBox: undefined, // constrain layout bounds; { x1, y1, x2, y2 } or { x1, y1, w, h }
   avoidOverlap: true, // prevents node overlap, may overflow boundingBox if not enough space
@@ -152,9 +135,41 @@ const stylesheet = [
       'target-arrow-color': '#bbb',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
+      'label': 'data(propertyLabel)',
+      'font-size': 14,
+      'color': '#333',
+      'text-background-color': '#fff',
+      'text-background-opacity': 1,
+      'text-background-padding': 2,
+      'text-rotation': 'autorotate',
     }
-  }
+  },
+  {
+    selector: 'edge[property = "P279"]',
+    style: {
+      'line-color': '#7ecbff',
+      'target-arrow-color': '#7ecbff',
+    }
+  },
 ];
+
+// Helper: Fetch Wikidata REST API property JSON for a PID
+async function fetchWikidataPropertyJson(pid) {
+  const url = `https://www.wikidata.org/w/rest.php/wikibase/v1/entities/properties/${pid}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch property JSON for ${pid}`);
+  return await res.json();
+}
+
+// Helper: Get label from property JSON
+function getLabelFromPropertyJson(propertyJson, lang = 'en') {
+  if (!propertyJson || !propertyJson.labels) return undefined;
+  return (
+    propertyJson.labels[lang] ||
+    propertyJson.labels['en'] ||
+    Object.values(propertyJson.labels)[0]
+  );
+}
 
 function App() {
   const [elements, setElements] = useState([]);
@@ -194,6 +209,7 @@ function App() {
       const nodes = {};
       const edgeSet = new Set();
       const edges = [];
+      const propertyIds = new Set();
       // Add all nodes
       for (const qid of qids) {
         const itemJson = qidToItemJson[qid];
@@ -209,21 +225,39 @@ function App() {
           }
         };
       }
-      // Add edges based on P279 claims
+      // Add edges based on P279 claims (and collect property ids)
       for (const qid of qids) {
         const itemJson = qidToItemJson[qid];
+        // Only P279 for now, but could generalize
         const p279s = itemJson?.statements?.P279 || [];
         for (const claim of p279s) {
           const parentQid = claim.value?.content;
           if (parentQid && qids.has(parentQid)) {
+            const pid = 'P279';
+            propertyIds.add(pid);
             const edgeKey = `${parentQid}->${qid}`;
             if (!edgeSet.has(edgeKey)) {
-              edges.push({ data: { source: parentQid, target: qid } });
+              edges.push({ data: { source: parentQid, target: qid, property: pid } });
               edgeSet.add(edgeKey);
             }
           }
         }
       }
+      // Fetch property labels
+      const pidToLabel = {};
+      await Promise.all(Array.from(propertyIds).map(async pid => {
+        try {
+          const propertyJson = await fetchWikidataPropertyJson(pid);
+          pidToLabel[pid] = getLabelFromPropertyJson(propertyJson) || pid;
+        } catch (e) {
+          console.warn('Failed to fetch property JSON for', pid, e);
+          pidToLabel[pid] = pid;
+        }
+      }));
+      // Add property label to edge data
+      edges.forEach(edge => {
+        edge.data.propertyLabel = pidToLabel[edge.data.property] || edge.data.property;
+      });
       setElements([...Object.values(nodes), ...edges]);
       setLayoutKey(prev => prev + 1);
     }
