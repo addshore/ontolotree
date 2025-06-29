@@ -70,7 +70,7 @@ function generateSimpleSuperclassQuery(rootQid) {
 const layout = {
   name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
 
-  fit: false, // whether to fit the viewport to the graph
+  fit: true, // whether to fit the viewport to the graph
   directed: true, // whether the tree is directed downwards (or edges can point in any direction if false)
   padding: 30, // padding on fit
   circle: false, // put depths in concentric circles if true, put depths top down if false
@@ -377,6 +377,9 @@ function App() {
           placeholder="Q144"
         />
         <span style={{ marginLeft: 12, color: '#888', fontSize: 14 }}>Press Enter to update</span>
+        <span style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500 }}>
+          Nodes: {elements.filter(el => el.data && el.data.id).length} | Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}
+        </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         <CytoscapeComponent
