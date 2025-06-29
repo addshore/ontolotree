@@ -51,8 +51,18 @@ function getImageFilenameFromItemJson(itemJson) {
   return claims[0]?.value.content;
 }
 
-// Helper: Generate SPARQL query for subclass tree (without images)
-function generateSubclassTreeQueryNoImages(rootQid, maxDepth) {
+// Helper: Get label from Wikidata REST API item JSON
+function getLabelFromItemJson(itemJson, lang = 'en') {
+  if (!itemJson || !itemJson.labels) return undefined;
+  return (
+    itemJson.labels[lang] ||
+    itemJson.labels['en'] ||
+    Object.values(itemJson.labels)[0]
+  );
+}
+
+// Helper: Generate SPARQL query for subclass tree (no images, no label service)
+function generateSubclassTreeQueryNoLabels(rootQid, maxDepth) {
   const unions = [];
   for (let depth = 1; depth <= maxDepth; depth++) {
     const path = Array(depth).fill('wdt:P279').join('/');
@@ -64,7 +74,7 @@ function generateSubclassTreeQueryNoImages(rootQid, maxDepth) {
     }
     unions.push(`\n  {\n    wd:${rootQid} ${path} ?value .\n    BIND(${depth} AS ?depth)\n    ${parentPattern}\n  }`);
   }
-  return `SELECT ?value ?valueLabel ?depth ?parent ?parentLabel WHERE {\n${unions.join('\n  UNION')}\n  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],mul,en". }\n}\nORDER BY ?depth`;
+  return `SELECT ?value ?depth ?parent WHERE {\n${unions.join('\n  UNION')}\n}`;
 }
 
 const layout = {
@@ -149,8 +159,8 @@ function App() {
   const maxDepth = 5;
   useEffect(() => {
     async function fetchData() {
-      // 1. Get subclass tree (no images) from SPARQL
-      const query = generateSubclassTreeQueryNoImages(rootQid, maxDepth);
+      // 1. Get subclass tree (no images, no labels) from SPARQL
+      const query = generateSubclassTreeQueryNoLabels(rootQid, maxDepth);
       const res = await fetch('https://query.wikidata.org/sparql', {
         method: 'POST',
         headers: {
@@ -176,39 +186,38 @@ function App() {
           console.warn('Failed to fetch item JSON for', qid, e);
         }
       }));
-      // 4. Build nodes and edges, adding itemJson to each node
+      // 4. Build nodes and edges, using JSON for labels
       const nodes = {};
       const edgeSet = new Set();
       const edges = [];
       if (!nodes[rootQid]) {
         const rootItemJson = qidToItemJson[rootQid];
         const rootImg = getImageFilenameFromItemJson(rootItemJson);
-        const rootLabel = rootItemJson?.labels?.en || "";
+        const rootLabel = getLabelFromItemJson(rootItemJson) || rootQid;
         nodes[rootQid] = {
           data: {
             id: rootQid,
             label: rootQid + ": " + rootLabel,
             img: rootImg ? commonsDirectUrl('File:' + rootImg) : undefined,
             itemJson: rootItemJson,
-            type: "root" // Add a flag to indicate this is the root node
+            type: "root"
           }
         };
       }
-
       data.results.bindings.forEach(row => {
         const qid = getQidFromUri(row.value.value);
         const parentQid = getQidFromUri(row.parent.value);
-        const label = row.valueLabel?.value || qid;
-        const parentLabel = row.parentLabel?.value || parentQid;
         const valueItemJson = qidToItemJson[qid];
         const parentItemJson = qidToItemJson[parentQid];
+        const valueLabel = getLabelFromItemJson(valueItemJson) || qid;
+        const parentLabel = getLabelFromItemJson(parentItemJson) || parentQid;
         const valueImg = getImageFilenameFromItemJson(valueItemJson);
         const parentImg = getImageFilenameFromItemJson(parentItemJson);
         if (!nodes[qid]) {
           nodes[qid] = {
             data: {
               id: qid,
-              label: qid + ": " + label,
+              label: qid + ": " + valueLabel,
               qid,
               img: valueImg ? commonsDirectUrl('File:' + valueImg) : undefined,
               itemJson: valueItemJson
@@ -238,11 +247,10 @@ function App() {
       // Find the root node, and add an attribute to indicate it's the root
       const rootNode = allNodes.find(node => node.data.id === rootQid);
       if (rootNode) {
-        rootNode.data.type = "root"; // Add a flag to indicate this is the root node
+        rootNode.data.type = "root";
       }
-
       setElements([...allNodes, ...edges]);
-      setLayoutKey(prev => prev + 1); // force layout refresh
+      setLayoutKey(prev => prev + 1);
     }
     fetchData();
   }, [rootQid, maxDepth]);
