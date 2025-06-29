@@ -195,8 +195,14 @@ function App() {
   useEffect(() => {
     async function fetchData() {
       const query = generateSubclassTreeQuery(rootQid, maxDepth);
-      const url = 'https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(query);
-      const res = await fetch(url);
+      const res = await fetch('https://query.wikidata.org/sparql', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/sparql-results+json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ query }),
+      });
       const data = await res.json();
       // Merge rootNode with query results, avoiding duplicate nodes by id
       const queryElements = sparqlResultsToElements(data.results.bindings, rootQid);
