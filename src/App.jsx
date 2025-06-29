@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
 import md5 from 'md5';
+import pLimit from 'p-limit';
 import './App.css';
 
 // Helper: Extract QID from Wikidata URI
@@ -38,7 +39,7 @@ function commonsDirectUrl(url) {
 // Helper: Fetch Wikidata REST API item JSON for a QID
 async function fetchWikidataItemJson(qid) {
   const url = `https://www.wikidata.org/w/rest.php/wikibase/v1/entities/items/${qid}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: 'force-cache' });
   if (!res.ok) throw new Error(`Failed to fetch item JSON for ${qid}`);
   return await res.json();
 }
@@ -65,10 +66,15 @@ function generateSimpleSubclassQuery(rootQid) {
   return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
 }
 
+// Helper: Generate SPARQL query for all ancestors (reverse P279 tree)
+function generateSimpleSuperclassQuery(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { ?i (wdt:P279/wdt:P279*) wd:${rootQid} }`;
+}
+
 const layout = {
   name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
 
-  fit: true, // whether to fit the viewport to the graph
+  fit: false, // whether to fit the viewport to the graph
   directed: true, // whether the tree is directed downwards (or edges can point in any direction if false)
   padding: 30, // padding on fit
   circle: false, // put depths in concentric circles if true, put depths top down if false
@@ -156,7 +162,7 @@ const stylesheet = [
 // Helper: Fetch Wikidata REST API property JSON for a PID
 async function fetchWikidataPropertyJson(pid) {
   const url = `https://www.wikidata.org/w/rest.php/wikibase/v1/entities/properties/${pid}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: 'force-cache' });
   if (!res.ok) throw new Error(`Failed to fetch property JSON for ${pid}`);
   return await res.json();
 }
@@ -171,6 +177,56 @@ function getLabelFromPropertyJson(propertyJson, lang = 'en') {
   );
 }
 
+// Helper: Generate simple SPARQL query for all descendants (P279 or P31)
+function generateSimpleSubclassOrInstanceQuery(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279|wdt:P31)+ ?i }`;
+}
+
+// Helper: Retry with exponential backoff for 429s
+async function fetchWithBackoff(fn, maxRetries = 5, baseDelay = 500) {
+  let attempt = 0;
+  while (true) {
+    try {
+      if (attempt > 0) {
+        console.log(`Retrying (attempt ${attempt})...`);
+      }
+      return await fn();
+    } catch (e) {
+      if (e?.response?.status === 429 || e?.message?.includes('429')) {
+        if (attempt >= maxRetries) {
+          console.error(`Max retries reached (${maxRetries}). Giving up.`);
+          throw e;
+        }
+        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 100;
+        console.warn(`Received 429. Waiting ${Math.round(delay)}ms before retrying (attempt ${attempt + 1})...`);
+        await new Promise(res => setTimeout(res, delay));
+        attempt++;
+      } else {
+        console.error('Fetch failed with error:', e);
+        throw e;
+      }
+    }
+  }
+}
+
+// Helper: Memoized fetch for Wikidata item JSON (avoid duplicate requests)
+const itemJsonCache = new Map();
+async function fetchWikidataItemJsonMemo(qid) {
+  if (itemJsonCache.has(qid)) return itemJsonCache.get(qid);
+  const promise = fetchWikidataItemJson(qid);
+  itemJsonCache.set(qid, promise);
+  return promise;
+}
+
+// Helper: Memoized fetch for Wikidata property JSON (avoid duplicate requests)
+const propertyJsonCache = new Map();
+async function fetchWikidataPropertyJsonMemo(pid) {
+  if (propertyJsonCache.has(pid)) return propertyJsonCache.get(pid);
+  const promise = fetchWikidataPropertyJson(pid);
+  propertyJsonCache.set(pid, promise);
+  return promise;
+}
+
 function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
@@ -179,33 +235,57 @@ function App() {
   const maxDepth = 7;
   useEffect(() => {
     async function fetchData() {
-      // 1. Get all descendants (no parent info) from SPARQL
-      const query = generateSimpleSubclassQuery(rootQid);
-      const res = await fetch('https://query.wikidata.org/sparql', {
+      // 1. Get all descendants (P279/P31) and all ancestors (reverse P279)
+      const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
+      const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
+      // Fetch descendants
+      const resDesc = await fetch('https://query.wikidata.org/sparql', {
         method: 'POST',
         headers: {
           'Accept': 'application/sparql-results+json',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({ query }),
+        body: new URLSearchParams({ query: descendantQuery }),
+        cache: 'force-cache',
       });
-      const data = await res.json();
-      // 2. Collect all QIDs (descendants + root)
+      const dataDesc = await resDesc.json();
+      // Fetch ancestors
+      const resAnc = await fetch('https://query.wikidata.org/sparql', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/sparql-results+json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ query: ancestorQuery }),
+        cache: 'force-cache',
+      });
+      const dataAnc = await resAnc.json();
+      // 2. Collect all QIDs (descendants, ancestors, root)
       const qids = new Set();
-      data.results.bindings.forEach(row => {
+      dataDesc.results.bindings.forEach(row => {
+        if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+      });
+      dataAnc.results.bindings.forEach(row => {
         if (row.i?.value) qids.add(getQidFromUri(row.i.value));
       });
       qids.add(rootQid);
-      // 3. Fetch all item JSONs in parallel
-      const qidToItemJson = {};
-      await Promise.all(Array.from(qids).map(async qid => {
-        try {
-          qidToItemJson[qid] = await fetchWikidataItemJson(qid);
-        } catch (e) {
-          console.warn('Failed to fetch item JSON for', qid, e);
+      // Remove everything from Qids that isnt Q\d+
+      const qidRegex = /^Q\d+$/;
+      qids.forEach(qid => {
+        if (!qidRegex.test(qid)) {
+          console.warn(`Skipping invalid QID: ${qid}`);
+          qids.delete(qid);
         }
-      }));
-      // 4. Build nodes and edges using P279 claims from JSON
+      });
+      // 3. Fetch all item JSONs in parallel, with concurrency and 429 handling, and memoization
+      const limit = pLimit(4);
+      const qidToItemJson = {};
+      await Promise.all(Array.from(qids).map(qid =>
+        limit(() => fetchWithBackoff(() => fetchWikidataItemJsonMemo(qid)))
+          .then(json => { qidToItemJson[qid] = json; })
+          .catch(e => { console.warn('Failed to fetch item JSON for', qid, e); })
+      ));
+      // 4. Build nodes and edges using P279 and P31 claims from JSON
       const nodes = {};
       const edgeSet = new Set();
       const edges = [];
@@ -225,17 +305,31 @@ function App() {
           }
         };
       }
-      // Add edges based on P279 claims (and collect property ids)
+      // Add edges based on P279 and P31 claims (and collect property ids)
       for (const qid of qids) {
         const itemJson = qidToItemJson[qid];
-        // Only P279 for now, but could generalize
+        // P279 edges
         const p279s = itemJson?.statements?.P279 || [];
         for (const claim of p279s) {
           const parentQid = claim.value?.content;
           if (parentQid && qids.has(parentQid)) {
             const pid = 'P279';
             propertyIds.add(pid);
-            const edgeKey = `${parentQid}->${qid}`;
+            const edgeKey = `${parentQid}->${qid}->${pid}`;
+            if (!edgeSet.has(edgeKey)) {
+              edges.push({ data: { source: parentQid, target: qid, property: pid } });
+              edgeSet.add(edgeKey);
+            }
+          }
+        }
+        // P31 edges
+        const p31s = itemJson?.statements?.P31 || [];
+        for (const claim of p31s) {
+          const parentQid = claim.value?.content;
+          if (parentQid && qids.has(parentQid)) {
+            const pid = 'P31';
+            propertyIds.add(pid);
+            const edgeKey = `${parentQid}->${qid}->${pid}`;
             if (!edgeSet.has(edgeKey)) {
               edges.push({ data: { source: parentQid, target: qid, property: pid } });
               edgeSet.add(edgeKey);
@@ -243,17 +337,13 @@ function App() {
           }
         }
       }
-      // Fetch property labels
+      // Fetch property labels with concurrency, 429 handling, and memoization
       const pidToLabel = {};
-      await Promise.all(Array.from(propertyIds).map(async pid => {
-        try {
-          const propertyJson = await fetchWikidataPropertyJson(pid);
-          pidToLabel[pid] = getLabelFromPropertyJson(propertyJson) || pid;
-        } catch (e) {
-          console.warn('Failed to fetch property JSON for', pid, e);
-          pidToLabel[pid] = pid;
-        }
-      }));
+      await Promise.all(Array.from(propertyIds).map(pid =>
+        limit(() => fetchWithBackoff(() => fetchWikidataPropertyJsonMemo(pid)))
+          .then(propertyJson => { pidToLabel[pid] = getLabelFromPropertyJson(propertyJson) || pid; })
+          .catch(e => { console.warn('Failed to fetch property JSON for', pid, e); pidToLabel[pid] = pid; })
+      ));
       // Add property label to edge data
       edges.forEach(edge => {
         edge.data.propertyLabel = pidToLabel[edge.data.property] || edge.data.property;
