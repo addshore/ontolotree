@@ -120,17 +120,18 @@ const getStylesheet = (showImages, nodeSize) => [
   {
     selector: 'node[type = "root"]',
     style: {
-      'border-color': 'green',
-      'border-width': 8
+      'border-color': '#00ff00',
+      'border-width': 12,
+      'border-style': 'double',
+      'background-color': '#e8f5e8',
+      'font-weight': 'bold',
+      'color': '#006600'
     }
   },
   {
     selector: 'node[sampledLevel]',
     style: {
-      'border-color': '#ff9800',
-      'border-width': 10,
-      'border-style': 'double',
-      'background-color': '#fffbe6'
+      'border-color': '#ccc'
     }
   },
   {
@@ -237,8 +238,8 @@ async function fetchWikidataPropertyJsonMemo(pid) {
 function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
-  const [rootQid, setRootQid] = useState(() => localStorage.getItem('ontolotree-rootQid') || 'Q144');
-  const [inputQid, setInputQid] = useState(() => localStorage.getItem('ontolotree-rootQid') || 'Q144');
+  const [rootQids, setRootQids] = useState(() => localStorage.getItem('ontolotree-rootQids') || 'Q144');
+  const [inputQids, setInputQids] = useState(() => localStorage.getItem('ontolotree-rootQids') || 'Q144');
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
   // Pending values for inputs
@@ -259,8 +260,8 @@ function App() {
 
   // Save settings to localStorage
   useEffect(() => {
-    localStorage.setItem('ontolotree-rootQid', rootQid);
-  }, [rootQid]);
+    localStorage.setItem('ontolotree-rootQids', rootQids);
+  }, [rootQids]);
 
   useEffect(() => {
     localStorage.setItem('ontolotree-sampleRate', sampleRate.toString());
@@ -288,43 +289,53 @@ function App() {
     }
   }, []);
 
-  // Redraw graph when rootQid or applied sample settings change
+  // Redraw graph when rootQids or applied sample settings change
   useEffect(() => {
     async function fetchData() {
-      // 1. Get all descendants (P279/P31) and all ancestors (reverse P279)
-      const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
-      const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
-      // Fetch descendants
-      const resDesc = await fetch('https://query.wikidata.org/sparql', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/sparql-results+json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({ query: descendantQuery }),
-        cache: 'force-cache',
-      });
-      const dataDesc = await resDesc.json();
-      // Fetch ancestors
-      const resAnc = await fetch('https://query.wikidata.org/sparql', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/sparql-results+json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({ query: ancestorQuery }),
-        cache: 'force-cache',
-      });
-      const dataAnc = await resAnc.json();
-      // 2. Collect all QIDs (descendants, ancestors, root)
+      // Parse comma-separated QIDs
+      const rootQidList = rootQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+      if (rootQidList.length === 0) return;
+      
+      // 1. Get all descendants (P279/P31) and all ancestors (reverse P279) for all root QIDs
       const qids = new Set();
-      dataDesc.results.bindings.forEach(row => {
-        if (row.i?.value) qids.add(getQidFromUri(row.i.value));
-      });
-      dataAnc.results.bindings.forEach(row => {
-        if (row.i?.value) qids.add(getQidFromUri(row.i.value));
-      });
-      qids.add(rootQid);
+      
+      for (const rootQid of rootQidList) {
+        const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
+        const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
+        
+        // Fetch descendants
+        const resDesc = await fetch('https://query.wikidata.org/sparql', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/sparql-results+json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({ query: descendantQuery }),
+          cache: 'force-cache',
+        });
+        const dataDesc = await resDesc.json();
+        
+        // Fetch ancestors
+        const resAnc = await fetch('https://query.wikidata.org/sparql', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/sparql-results+json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({ query: ancestorQuery }),
+          cache: 'force-cache',
+        });
+        const dataAnc = await resAnc.json();
+        
+        // Collect QIDs from this root
+        dataDesc.results.bindings.forEach(row => {
+          if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+        });
+        dataAnc.results.bindings.forEach(row => {
+          if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+        });
+        qids.add(rootQid);
+      }
       // Remove everything from Qids that isnt Q\d+
       const qidRegex = /^Q\d+$/;
       qids.forEach(qid => {
@@ -364,7 +375,7 @@ function App() {
             label: qid + ': ' + label,
             img: img ? commonsDirectUrl('File:' + img) : undefined,
             itemJson,
-            type: qid === rootQid ? 'root' : undefined
+            type: rootQidList.includes(qid) ? 'root' : undefined
           }
         };
       }
@@ -396,11 +407,11 @@ function App() {
           }
         }
       }
-      // 2. BFS from root to assign levels
+      // 2. BFS from all roots to assign levels
       const qidToLevel = {};
       const levelToQids = {};
       const visited = new Set();
-      const queue = [[rootQid, 0]];
+      const queue = rootQidList.map(qid => [qid, 0]);
       while (queue.length > 0) {
         const [qid, level] = queue.shift();
         if (visited.has(qid)) continue;
@@ -475,8 +486,8 @@ function App() {
           }
         }
       }
-      // Downwards: BFS from root, only keep paths that reach sampled nodes
-      const queue2 = [rootQid];
+      // Downwards: BFS from all roots, only keep paths that reach sampled nodes
+      const queue2 = [...rootQidList];
       while (queue2.length > 0) {
         const qid = queue2.shift();
         if (!mustKeep.has(qid)) continue;
@@ -574,17 +585,18 @@ function App() {
       setLayoutKey(prev => prev + 1);
     }
     fetchData();
-  }, [rootQid, appliedSampleRate, appliedSampleCount]);
+  }, [rootQids, appliedSampleRate, appliedSampleCount]);
 
   // Handler for input box
   function handleInputChange(e) {
-    setInputQid(e.target.value);
+    setInputQids(e.target.value);
   }
   function handleInputKeyDown(e) {
     if (e.key === 'Enter') {
-      const trimmed = inputQid.trim();
-      if (/^Q\d+$/.test(trimmed)) {
-        setRootQid(trimmed);
+      const trimmed = inputQids.trim();
+      const qidList = trimmed.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+      if (qidList.length > 0) {
+        setRootQids(trimmed);
       }
     }
   }
@@ -592,15 +604,15 @@ function App() {
   return (
     <div className="App" style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '12px 16px 8px 16px', background: '#f0f0f0', borderBottom: '1px solid #ddd', display: 'flex', alignItems: 'center', zIndex: 2 }}>
-        <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>Root QID:</label>
+        <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>IDs:</label>
         <input
           id="qid-input"
           type="text"
-          value={inputQid}
+          value={inputQids}
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
-          style={{ fontSize: 18, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: 120 }}
-          placeholder="Q144"
+          style={{ fontSize: 18, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: 180 }}
+          placeholder="Q144,Q5"
         />
         <div style={{ marginLeft: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
           <label htmlFor="sample-rate" style={{ fontWeight: 'bold', marginRight: 4 }}>Sample Rate:</label>
@@ -679,7 +691,7 @@ function App() {
               !elements.some(el => el.data && el.data.id === item.qid)
             );
             setModalData({
-              nodeLabel: `All Items (${rootQid})`,
+              nodeLabel: `All Items (${rootQids})`,
               shownItems,
               hiddenItems
             });
