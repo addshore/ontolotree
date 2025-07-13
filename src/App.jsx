@@ -48,8 +48,8 @@ function commonsDirectUrl(url) {
   const first2 = hash.slice(0, 2);
   return `https://upload.wikimedia.org/wikipedia/commons/${first}/${first2}/${encodeURIComponent(filename)}`;
 }
-function getLayout(elements) {
-  // If Q35120 ("entity") is present, force it as the root
+function getLayout(elements, forceEntityRoot) {
+  // If Q35120 ("entity") is present and forced, use as root
   const hasEntity = elements.some(
     el => el.data && el.data.id === "Q35120"
   );
@@ -64,7 +64,7 @@ function getLayout(elements) {
     boundingBox: undefined,
     avoidOverlap: true,
     nodeDimensionsIncludeLabels: false,
-    roots: hasEntity ? ["Q35120"] : undefined,
+    roots: forceEntityRoot && hasEntity ? ["Q35120"] : undefined,
     depthSort: undefined,
     animate: false,
     animationDuration: 500,
@@ -183,6 +183,7 @@ function App() {
   const [highlightQidLabels, setHighlightQidLabels] = useState([]);
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
+  const [forceEntityRoot, setForceEntityRoot] = useState(true);
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [sampleCount, setSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
@@ -914,8 +915,20 @@ function App() {
               />
               <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
             </div>
-            {/* Graph library selection */}
+            {/* Force entity as root */}
             <div style={{ marginTop: 16 }}>
+              <label style={{ fontWeight: 'bold', marginRight: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={forceEntityRoot}
+                  onChange={e => setForceEntityRoot(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Force "entity" as root
+              </label>
+            </div>
+            {/* Graph library selection */}
+            <div style={{ marginTop: 8 }}>
               <label style={{ fontWeight: 'bold', marginRight: 8 }}>Graph Library:</label>
               <button
                 onClick={() => setGraphType('cytoscape')}
@@ -1077,7 +1090,7 @@ function App() {
           <CytoscapeComponent
             key={layoutKey}
             elements={elements}
-            layout={getLayout(elements)}
+            layout={getLayout(elements, forceEntityRoot)}
             stylesheet={getStylesheet(showImages, nodeSize)}
             style={{ width: '100%', height: '100%', background: '#fafafa' }}
             cy={(cy) => {
@@ -1085,7 +1098,7 @@ function App() {
             }}
           />
         ) : (
-          <ReactFlowGraph elements={elements} showImages={showImages} />
+          <ReactFlowGraph elements={elements} showImages={showImages} forceEntityRoot={forceEntityRoot} />
         )}
       </div>
     </div>
