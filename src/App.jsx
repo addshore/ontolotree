@@ -235,19 +235,36 @@ async function fetchWikidataPropertyJsonMemo(pid) {
 function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
-  const [rootQid, setRootQid] = useState('Q144'); // root QID, default Q144
-  const [inputQid, setInputQid] = useState('Q144'); // for the input box
-  const [showImages, setShowImages] = useState(true); // show/hide images
+  const [rootQid, setRootQid] = useState(() => localStorage.getItem('ontolotree-rootQid') || 'Q144');
+  const [inputQid, setInputQid] = useState(() => localStorage.getItem('ontolotree-rootQid') || 'Q144');
+  const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   // Pending values for inputs
-  const [sampleRate, setSampleRate] = useState(100); // input value
-  const [sampleCount, setSampleCount] = useState(10); // input value
+  const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
+  const [sampleCount, setSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
   // Applied values for graph
-  const [appliedSampleRate, setAppliedSampleRate] = useState(100);
-  const [appliedSampleCount, setAppliedSampleCount] = useState(10);
+  const [appliedSampleRate, setAppliedSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
+  const [appliedSampleCount, setAppliedSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
   const [hiddenNodeCount, setHiddenNodeCount] = useState(0);
   const [hiddenEdgeCount, setHiddenEdgeCount] = useState(0);
   const [totalNodeCount, setTotalNodeCount] = useState(0);
   const [totalEdgeCount, setTotalEdgeCount] = useState(0);
+
+  // Save settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('ontolotree-rootQid', rootQid);
+  }, [rootQid]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-sampleRate', sampleRate.toString());
+  }, [sampleRate]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-sampleCount', sampleCount.toString());
+  }, [sampleCount]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-showImages', showImages.toString());
+  }, [showImages]);
 
   // Redraw graph when rootQid or applied sample settings change
   useEffect(() => {
