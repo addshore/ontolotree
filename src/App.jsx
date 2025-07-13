@@ -431,46 +431,36 @@ function App() {
           }
         }
       }
-      // For each highlight QID, keep all shortest paths to each root QID
-      for (const highlightQid of highlightQidList) {
-        for (const rootQid of rootQidList) {
-          // BFS for shortest path from highlightQid to rootQid
-          let queue = [[highlightQid]];
-          const visited = new Set();
-          let shortestPaths = [];
-          let minLen = Infinity;
-          while (queue.length > 0) {
-            const path = queue.shift();
-            const current = path[path.length - 1];
-            if (visited.has(current)) continue;
-            visited.add(current);
-            if (current === rootQid) {
-              if (path.length < minLen) {
-                shortestPaths = [path];
-                minLen = path.length;
-              } else if (path.length === minLen) {
-                shortestPaths.push(path);
-              }
-              continue;
-            }
-            // Continue searching both up and down
-            if (parentMap[current]) {
-              for (const parent of parentMap[current]) {
-                if (!visited.has(parent)) {
-                  queue.push([...path, parent]);
-                }
-              }
-            }
-            if (childrenMap[current]) {
-              for (const child of childrenMap[current]) {
-                if (!visited.has(child)) {
-                  queue.push([...path, child]);
-                }
-              }
+      // For each highlight QID, keep all nodes on any path to each root QID (not just shortest)
+      function findAllPaths(start, end, parentMap, childrenMap, maxDepth = 15) {
+        const paths = [];
+        function dfs(current, path, visited, depth) {
+          if (depth > maxDepth) return;
+          if (current === end) {
+            paths.push([...path, current]);
+            return;
+          }
+          visited.add(current);
+          // Upwards
+          for (const parent of parentMap[current] || []) {
+            if (!visited.has(parent)) {
+              dfs(parent, [...path, current], new Set(visited), depth + 1);
             }
           }
-          // Add all nodes on all shortest paths
-          for (const path of shortestPaths) {
+          // Downwards
+          for (const child of childrenMap[current] || []) {
+            if (!visited.has(child)) {
+              dfs(child, [...path, current], new Set(visited), depth + 1);
+            }
+          }
+        }
+        dfs(start, [], new Set(), 0);
+        return paths;
+      }
+      for (const highlightQid of highlightQidList) {
+        for (const rootQid of rootQidList) {
+          const allPaths = findAllPaths(highlightQid, rootQid, parentMap, childrenMap, 15);
+          for (const path of allPaths) {
             for (const qid of path) {
               mustKeep.add(qid);
             }
