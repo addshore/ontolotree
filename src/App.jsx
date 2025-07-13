@@ -89,7 +89,7 @@ const layout = {
   stop: undefined, // callback on layoutstop
   transform: function (node, position ){ return position; } // transform a given node position. Useful for changing flow direction in discrete layouts0
 };
-const getStylesheet = (showImages) => [
+const getStylesheet = (showImages, nodeSize) => [
   {
     selector: 'node[img]',
     style: {
@@ -108,8 +108,8 @@ const getStylesheet = (showImages) => [
       'color': '#111',
       'font-size': 14,
       'font-weight': 'normal',
-      'width': 100,
-      'height': 100,
+      'width': nodeSize,
+      'height': nodeSize,
       'border-width': 6,
       'border-color': '#888',
       'shape': 'ellipse',
@@ -240,6 +240,7 @@ function App() {
   const [rootQid, setRootQid] = useState(() => localStorage.getItem('ontolotree-rootQid') || 'Q144');
   const [inputQid, setInputQid] = useState(() => localStorage.getItem('ontolotree-rootQid') || 'Q144');
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
+  const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [sampleCount, setSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
@@ -272,6 +273,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ontolotree-showImages', showImages.toString());
   }, [showImages]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-nodeSize', nodeSize.toString());
+  }, [nodeSize]);
 
   // Trigger initial redraw if applied settings don't match localStorage
   useEffect(() => {
@@ -640,7 +645,7 @@ function App() {
             Redraw Graph
           </button>
         </div>
-        <div style={{ marginLeft: 24, display: 'flex', alignItems: 'center' }}>
+        <div style={{ marginLeft: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
           <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
             <input
               type="checkbox"
@@ -650,6 +655,19 @@ function App() {
             />
             Show Images
           </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label htmlFor="node-size" style={{ fontWeight: 'bold' }}>Node Size:</label>
+            <input
+              id="node-size"
+              type="range"
+              min={50}
+              max={200}
+              value={nodeSize}
+              onChange={e => setNodeSize(Number(e.target.value))}
+              style={{ width: 80 }}
+            />
+            <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
+          </div>
         </div>
         <span 
           style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
@@ -676,7 +694,7 @@ function App() {
           key={layoutKey}
           elements={elements}
           layout={layout}
-          stylesheet={getStylesheet(showImages)}
+          stylesheet={getStylesheet(showImages, nodeSize)}
           style={{ width: '100vw', height: '100%', background: '#fafafa' }}
           cy={(cy) => {
             cyRef.current = cy;
