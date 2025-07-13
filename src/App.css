@@ -132,3 +132,44 @@
   color: #222 !important;
   font-size: 1.5rem !important;
 }
+
+.qid-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.qid-chip {
+  display: inline-flex;
+  align-items: center;
+  background: #e0e0e0;
+  border-radius: 16px;
+  padding: 2px 8px 2px 6px;
+  font-size: 14px;
+  margin-right: 4px;
+  margin-bottom: 2px;
+}
+.qid-chip-id {
+  font-weight: bold;
+  margin-right: 4px;
+  color: #0074D9;
+}
+.qid-chip-label {
+  margin-right: 6px;
+  color: #333;
+}
+.qid-chip-remove {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  margin-left: 2px;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 50%;
+  transition: background 0.2s;
+}
+.qid-chip-remove:hover {
+  background: #ffdddd;
+  color: #c00;
+}

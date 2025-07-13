@@ -162,10 +162,18 @@ const getStylesheet = (showImages, nodeSize) => [
 function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
-  const [rootQids, setRootQids] = useState(() => localStorage.getItem('ontolotree-rootQids') || 'Q144');
-  const [inputQids, setInputQids] = useState(() => localStorage.getItem('ontolotree-rootQids') || 'Q144');
-  const [highlightQids, setHighlightQids] = useState(() => localStorage.getItem('ontolotree-highlightQids') || '');
-  const [inputHighlightQids, setInputHighlightQids] = useState(() => localStorage.getItem('ontolotree-highlightQids') || '');
+  const [rootQids, setRootQids] = useState(() => {
+    const stored = localStorage.getItem('ontolotree-rootQids');
+    return stored ? stored.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid)) : ['Q144'];
+  });
+  const [inputQid, setInputQid] = useState('');
+  const [rootQidLabels, setRootQidLabels] = useState([]);
+  const [highlightQids, setHighlightQids] = useState(() => {
+    const stored = localStorage.getItem('ontolotree-highlightQids');
+    return stored ? stored.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid)) : [];
+  });
+  const [inputHighlightQid, setInputHighlightQid] = useState('');
+  const [highlightQidLabels, setHighlightQidLabels] = useState([]);
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
   // Pending values for inputs
@@ -185,7 +193,7 @@ function App() {
   }, [rootQids]);
 
   useEffect(() => {
-    localStorage.setItem('ontolotree-highlightQids', highlightQids);
+    localStorage.setItem('ontolotree-highlightQids', highlightQids.join(','));
   }, [highlightQids]);
 
   useEffect(() => {
@@ -217,9 +225,9 @@ function App() {
   // Redraw graph when rootQids or applied sample settings change
   useEffect(() => {
     async function fetchData() {
-      // Parse comma-separated QIDs
-      const rootQidList = rootQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
-      const highlightQidList = highlightQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+      // Use rootQids array directly
+      const rootQidList = rootQids;
+      const highlightQidList = highlightQids;
       if (rootQidList.length === 0) return;
       
       // 1. Get all descendants (P279/P31) and all ancestors (reverse P279) for all root QIDs
@@ -589,31 +597,55 @@ function App() {
   }, [rootQids, appliedSampleRate, appliedSampleCount]);
 
   // Handler for input box
-  function handleInputChange(e) {
-    setInputQids(e.target.value);
-  }
-  function handleInputKeyDown(e) {
-    if (e.key === 'Enter') {
-      const trimmed = inputQids.trim();
-      const qidList = trimmed.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
-      if (qidList.length > 0) {
-        setRootQids(trimmed);
-      }
-    }
-  }
-  function handleHighlightInputChange(e) {
-    setInputHighlightQids(e.target.value);
-  }
-  function handleHighlightInputKeyDown(e) {
-    if (e.key === 'Enter') {
-      setHighlightQids(inputHighlightQids.trim());
-    }
-  }
 
   // Sidebar collapse state
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(340);
   const [isResizing, setIsResizing] = useState(false);
+
+  // Fetch labels for rootQids
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLabels() {
+      const labels = await Promise.all(
+        rootQids.map(async qid => {
+          try {
+            const json = await fetchWikidataItemJsonMemo(qid);
+            return { qid, label: getLabelFromItemJson(json) || qid };
+          } catch {
+            return { qid, label: qid };
+          }
+        })
+      );
+      if (!cancelled) setRootQidLabels(labels);
+    }
+    fetchLabels();
+    return () => { cancelled = true; };
+  }, [rootQids]);
+
+  // Fetch labels for highlightQids
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLabels() {
+      if (highlightQids.length === 0) {
+        setHighlightQidLabels([]);
+        return;
+      }
+      const labels = await Promise.all(
+        highlightQids.map(async qid => {
+          try {
+            const json = await fetchWikidataItemJsonMemo(qid);
+            return { qid, label: getLabelFromItemJson(json) || qid };
+          } catch {
+            return { qid, label: qid };
+          }
+        })
+      );
+      if (!cancelled) setHighlightQidLabels(labels);
+    }
+    fetchLabels();
+    return () => { cancelled = true; };
+  }, [highlightQids]);
 
   // Handle sidebar resizing with window listeners
   useEffect(() => {
@@ -641,8 +673,8 @@ function App() {
 
   // Compute sidebar table data on elements/allItems/rootQids/highlightQids change
   useEffect(() => {
-    const rootQidList = rootQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
-    const highlightQidList = highlightQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+    const rootQidList = rootQids;
+    const highlightQidList = highlightQids;
     const shownItems = allItems.filter(item =>
       elements.some(el => el.data && el.data.id === item.qid)
     ).map(item => {
@@ -668,7 +700,7 @@ function App() {
       !elements.some(el => el.data && el.data.id === item.qid)
     ).map(item => ({ ...item, reason: 'hidden (sampled)' }));
     setSidebarTableData({
-      nodeLabel: `All Items (${rootQids})`,
+      nodeLabel: `All Items (${rootQids.join(', ')})`,
       shownItems,
       hiddenItems
     });
@@ -715,22 +747,82 @@ function App() {
             <input
               id="qid-input"
               type="text"
-              value={inputQids}
-              onChange={handleInputChange}
-              onKeyDown={handleInputKeyDown}
+              value={inputQid}
+              onChange={e => setInputQid(e.target.value)}
+              onKeyDown={async e => {
+                if (e.key === 'Enter') {
+                  const entries = inputQid.split(',').map(q => q.trim()).filter(Boolean);
+                  let added = false;
+                  for (const qid of entries) {
+                    if (/^Q\d+$/.test(qid) && !rootQids.includes(qid)) {
+                      setRootQids(prev => [...prev, qid]);
+                      added = true;
+                    }
+                  }
+                  if (added) setInputQid('');
+                }
+              }}
               style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', marginBottom: 8 }}
               placeholder="Q144,Q5"
             />
+            <div className="qid-chip-list">
+              {rootQids.map(qid => {
+                const labelObj = rootQidLabels.find(l => l.qid === qid);
+                return (
+                  <span className="qid-chip" key={qid}>
+                    <span className="qid-chip-id">{qid}</span>
+                    {labelObj && labelObj.label && (
+                      <span className="qid-chip-label">{labelObj.label}</span>
+                    )}
+                    <button
+                      className="qid-chip-remove"
+                      onClick={() => setRootQids(rootQids.filter(id => id !== qid))}
+                      aria-label={`Remove ${qid}`}
+                    >×</button>
+                  </span>
+                );
+              })}
+            </div>
             <label htmlFor="highlight-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8, color: 'green' }}>Highlight IDs:</label>
             <input
               id="highlight-qid-input"
               type="text"
-              value={inputHighlightQids}
-              onChange={handleHighlightInputChange}
-              onKeyDown={handleHighlightInputKeyDown}
+              value={inputHighlightQid}
+              onChange={e => setInputHighlightQid(e.target.value)}
+              onKeyDown={async e => {
+                if (e.key === 'Enter') {
+                  const entries = inputHighlightQid.split(',').map(q => q.trim()).filter(Boolean);
+                  let added = false;
+                  for (const qid of entries) {
+                    if (/^Q\d+$/.test(qid) && !highlightQids.includes(qid)) {
+                      setHighlightQids(prev => [...prev, qid]);
+                      added = true;
+                    }
+                  }
+                  if (added) setInputHighlightQid('');
+                }
+              }}
               style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', background: '#eaffea' }}
               placeholder="Q42,Q1"
             />
+            <div className="qid-chip-list">
+              {highlightQids.map(qid => {
+                const labelObj = highlightQidLabels.find(l => l.qid === qid);
+                return (
+                  <span className="qid-chip" key={qid}>
+                    <span className="qid-chip-id">{qid}</span>
+                    {labelObj && labelObj.label && (
+                      <span className="qid-chip-label">{labelObj.label}</span>
+                    )}
+                    <button
+                      className="qid-chip-remove"
+                      onClick={() => setHighlightQids(highlightQids.filter(id => id !== qid))}
+                      aria-label={`Remove ${qid}`}
+                    >×</button>
+                  </span>
+                );
+              })}
+            </div>
           </section>
           {/* Filtering */}
           <section className="sidebar-section">
@@ -766,30 +858,28 @@ function App() {
                 background: (
                   sampleRate !== appliedSampleRate ||
                   sampleCount !== appliedSampleCount ||
-                  inputQids !== rootQids ||
-                  inputHighlightQids !== highlightQids
+                  rootQids.join(',') !== (localStorage.getItem('ontolotree-rootQids') || 'Q144') ||
+                  highlightQids.join(',') !== (localStorage.getItem('ontolotree-highlightQids') || '')
                 ) ? '#0074D9' : '#ccc',
                 color: '#fff',
                 fontWeight: 600,
                 cursor: (
                   sampleRate !== appliedSampleRate ||
                   sampleCount !== appliedSampleCount ||
-                  inputQids !== rootQids ||
-                  inputHighlightQids !== highlightQids
+                  rootQids.join(',') !== (localStorage.getItem('ontolotree-rootQids') || 'Q144') ||
+                  highlightQids.join(',') !== (localStorage.getItem('ontolotree-highlightQids') || '')
                 ) ? 'pointer' : 'not-allowed',
                 transition: 'background 0.2s'
               }}
               disabled={!(
                 sampleRate !== appliedSampleRate ||
                 sampleCount !== appliedSampleCount ||
-                inputQids !== rootQids ||
-                inputHighlightQids !== highlightQids
+                rootQids.join(',') !== (localStorage.getItem('ontolotree-rootQids') || 'Q144') ||
+                highlightQids.join(',') !== (localStorage.getItem('ontolotree-highlightQids') || '')
               )}
               onClick={() => {
                 setAppliedSampleRate(sampleRate);
                 setAppliedSampleCount(sampleCount);
-                if (inputQids !== rootQids) setRootQids(inputQids);
-                if (inputHighlightQids !== highlightQids) setHighlightQids(inputHighlightQids);
               }}
             >
               Redraw Graph
