@@ -89,12 +89,12 @@ const layout = {
   stop: undefined, // callback on layoutstop
   transform: function (node, position ){ return position; } // transform a given node position. Useful for changing flow direction in discrete layouts0
 };
-const stylesheet = [
+const getStylesheet = (showImages) => [
   {
     selector: 'node[img]',
     style: {
       'background-fit': 'cover',
-      'background-image': 'data(img)',
+      'background-image': showImages ? 'data(img)' : 'none',
     }
   },
   {
@@ -237,6 +237,7 @@ function App() {
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
   const [rootQid, setRootQid] = useState('Q144'); // root QID, default Q144
   const [inputQid, setInputQid] = useState('Q144'); // for the input box
+  const [showImages, setShowImages] = useState(true); // show/hide images
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(100); // input value
   const [sampleCount, setSampleCount] = useState(10); // input value
@@ -586,6 +587,17 @@ function App() {
             Redraw Graph
           </button>
         </div>
+        <div style={{ marginLeft: 24, display: 'flex', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={showImages}
+              onChange={e => setShowImages(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Show Images
+          </label>
+        </div>
         <span style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500 }}>
           Nodes: {elements.filter(el => el.data && el.data.id).length}
           {hiddenNodeCount > 0 && (
@@ -607,7 +619,7 @@ function App() {
           key={layoutKey}
           elements={elements}
           layout={layout}
-          stylesheet={stylesheet}
+          stylesheet={getStylesheet(showImages)}
           style={{ width: '100vw', height: '100%', background: '#fafafa' }}
         />
       </div>
