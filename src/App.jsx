@@ -511,7 +511,7 @@ function App() {
       for (const qid of Object.keys(nodes)) {
         const itemJson = qidToItemJson[qid];
         const label = getLabelFromItemJson(itemJson) || qid;
-        nodes[qid].data.label = `${shownCount}/${totalCount}\n${label}`;
+        nodes[qid].data.label = `${qid}\n${label}`;
         nodes[qid].data.shownCount = shownCount;
         nodes[qid].data.totalCount = totalCount;
       }
