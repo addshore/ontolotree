@@ -987,25 +987,37 @@ function App() {
               }}
               value={
                 (() => {
-                  // Nodes
+                  // Nodes with labels
                   const shown = (sidebarTableData?.shownItems || []).map(
-                    n => `${n.qid} ${n.reason.replace('shown ', 's:').replace('shown', 's')}`
+                    n => `${n.qid} (${n.label}) ${n.reason.replace('shown ', 's:').replace('shown', 's')}`
                   );
                   const hidden = (sidebarTableData?.hiddenItems || []).map(
-                    n => `${n.qid} h:${n.reason.replace('hidden ', '')}`
+                    n => `${n.qid} (${n.label}) h:${n.reason.replace('hidden ', '')}`
                   );
-                  // Edges
+                  // Edges with property labels
                   const edgeLines = (elements || [])
                     .filter(e => e.data && e.data.source && e.data.target)
                     .map(e =>
-                      `${e.data.source}->${e.data.target} [${e.data.property || ''}]`
+                      `${e.data.source}->${e.data.target} [${e.data.property || ''}${e.data.propertyLabel ? ' (' + e.data.propertyLabel + ')' : ''}]`
                     );
+                  // Unique P ids and their labels
+                  const pidLabels = {};
+                  (elements || []).forEach(e => {
+                    if (e.data && e.data.property) {
+                      pidLabels[e.data.property] = e.data.propertyLabel || e.data.property;
+                    }
+                  });
+                  const pidLabelLines = Object.entries(pidLabels).map(
+                    ([pid, label]) => `${pid}: ${label}`
+                  );
                   return [
                     '# Nodes:',
                     ...shown,
                     ...hidden,
                     '# Edges:',
-                    ...edgeLines
+                    ...edgeLines,
+                    '# Property labels:',
+                    ...pidLabelLines
                   ].join('\n');
                 })()
               }
