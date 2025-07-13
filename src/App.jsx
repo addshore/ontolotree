@@ -482,9 +482,33 @@ function App() {
         }
       }
 
-      // Ensure all edges along highlight-to-root paths are present
-      // (edges are added later, but we need to ensure both nodes are present, which is now done)
-      
+      // --- Remove disconnected islands: only keep nodes reachable from roots or highlight nodes ---
+      const reachable = new Set();
+      const stack = [...rootQidList, ...highlightQidList].filter(qid => nodes[qid]);
+      while (stack.length > 0) {
+        const qid = stack.pop();
+        if (reachable.has(qid)) continue;
+        reachable.add(qid);
+        // Traverse children (downwards)
+        for (const child of childrenMap[qid] || []) {
+          if (nodes[child] && !reachable.has(child)) {
+            stack.push(child);
+          }
+        }
+        // Traverse parents (upwards)
+        for (const parent of parentMap[qid] || []) {
+          if (nodes[parent] && !reachable.has(parent)) {
+            stack.push(parent);
+          }
+        }
+      }
+      // Remove any nodes not in reachable set
+      for (const qid of Object.keys(nodes)) {
+        if (!reachable.has(qid)) {
+          delete nodes[qid];
+        }
+      }
+
       // Update labels with counts after removal
       const shownCount = Object.keys(nodes).length;
       const totalCount = qids.size;
