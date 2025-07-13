@@ -3,6 +3,16 @@ import CytoscapeComponent from 'react-cytoscapejs';
 import md5 from 'md5';
 import pLimit from 'p-limit';
 import './App.css';
+import {
+  fetchWithBackoff,
+  fetchWikidataItemJsonMemo,
+  fetchWikidataPropertyJsonMemo,
+  getLabelFromItemJson,
+  getLabelFromPropertyJson,
+  getImageFilenameFromItemJson,
+  generateSimpleSuperclassQuery,
+  generateSimpleSubclassOrInstanceQuery
+} from './wikidataService';
 
 // Helper: Extract QID from Wikidata URI
 function getQidFromUri(uri) {
@@ -35,38 +45,6 @@ function commonsDirectUrl(url) {
   const first2 = hash.slice(0, 2);
   return `https://upload.wikimedia.org/wikipedia/commons/${first}/${first2}/${encodeURIComponent(filename)}`;
 }
-
-// Helper: Fetch Wikidata REST API item JSON for a QID
-async function fetchWikidataItemJson(qid) {
-  const url = `https://www.wikidata.org/w/rest.php/wikibase/v1/entities/items/${qid}`;
-  const res = await fetch(url, { cache: 'force-cache' });
-  if (!res.ok) throw new Error(`Failed to fetch item JSON for ${qid}`);
-  return await res.json();
-}
-
-// Helper: Get P18 image filename from Wikidata REST API item JSON
-function getImageFilenameFromItemJson(itemJson) {
-  const claims = itemJson.statements?.P18;
-  if (!claims || !Array.isArray(claims) || claims.length === 0) return undefined;
-  // P18 is a string value in the value field
-  return claims[0]?.value.content;
-}
-
-// Helper: Get label from Wikidata REST API item JSON
-function getLabelFromItemJson(itemJson, lang = 'en') {
-  if (!itemJson || !itemJson.labels) return undefined;
-  return (
-    itemJson.labels[lang] ||
-    itemJson.labels['en'] ||
-    Object.values(itemJson.labels)[0]
-  );
-}
-
-// Helper: Generate SPARQL query for all ancestors (reverse P279 tree)
-function generateSimpleSuperclassQuery(rootQid) {
-  return `SELECT DISTINCT ?i WHERE { ?i (wdt:P279/wdt:P279*) wd:${rootQid} }`;
-}
-
 const layout = {
   name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
 
@@ -167,73 +145,6 @@ const getStylesheet = (showImages, nodeSize) => [
   },
 ];
 
-// Helper: Fetch Wikidata REST API property JSON for a PID
-async function fetchWikidataPropertyJson(pid) {
-  const url = `https://www.wikidata.org/w/rest.php/wikibase/v1/entities/properties/${pid}`;
-  const res = await fetch(url, { cache: 'force-cache' });
-  if (!res.ok) throw new Error(`Failed to fetch property JSON for ${pid}`);
-  return await res.json();
-}
-
-// Helper: Get label from property JSON
-function getLabelFromPropertyJson(propertyJson, lang = 'en') {
-  if (!propertyJson || !propertyJson.labels) return undefined;
-  return (
-    propertyJson.labels[lang] ||
-    propertyJson.labels['en'] ||
-    Object.values(propertyJson.labels)[0]
-  );
-}
-
-// Helper: Generate simple SPARQL query for all descendants (P279 or P31)
-function generateSimpleSubclassOrInstanceQuery(rootQid) {
-  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
-}
-
-// Helper: Retry with exponential backoff for 429s
-async function fetchWithBackoff(fn, maxRetries = 5, baseDelay = 500) {
-  let attempt = 0;
-  while (true) {
-    try {
-      if (attempt > 0) {
-        console.log(`Retrying (attempt ${attempt})...`);
-      }
-      return await fn();
-    } catch (e) {
-      if (e?.response?.status === 429 || e?.message?.includes('429')) {
-        if (attempt >= maxRetries) {
-          console.error(`Max retries reached (${maxRetries}). Giving up.`);
-          throw e;
-        }
-        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 100;
-        console.warn(`Received 429. Waiting ${Math.round(delay)}ms before retrying (attempt ${attempt + 1})...`);
-        await new Promise(res => setTimeout(res, delay));
-        attempt++;
-      } else {
-        console.error('Fetch failed with error:', e);
-        throw e;
-      }
-    }
-  }
-}
-
-// Helper: Memoized fetch for Wikidata item JSON (avoid duplicate requests)
-const itemJsonCache = new Map();
-async function fetchWikidataItemJsonMemo(qid) {
-  if (itemJsonCache.has(qid)) return itemJsonCache.get(qid);
-  const promise = fetchWikidataItemJson(qid);
-  itemJsonCache.set(qid, promise);
-  return promise;
-}
-
-// Helper: Memoized fetch for Wikidata property JSON (avoid duplicate requests)
-const propertyJsonCache = new Map();
-async function fetchWikidataPropertyJsonMemo(pid) {
-  if (propertyJsonCache.has(pid)) return propertyJsonCache.get(pid);
-  const promise = fetchWikidataPropertyJson(pid);
-  propertyJsonCache.set(pid, promise);
-  return promise;
-}
 
 function App() {
   const [elements, setElements] = useState([]);
@@ -248,9 +159,7 @@ function App() {
   // Applied values for graph
   const [appliedSampleRate, setAppliedSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [appliedSampleCount, setAppliedSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
-  const [hiddenNodeCount, setHiddenNodeCount] = useState(0);
-  const [hiddenEdgeCount, setHiddenEdgeCount] = useState(0);
-  const [totalNodeCount, setTotalNodeCount] = useState(0);
+    const [totalNodeCount, setTotalNodeCount] = useState(0);
   const [totalEdgeCount, setTotalEdgeCount] = useState(0);
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -559,8 +468,7 @@ function App() {
         nodeIds.has(e.data.source) && nodeIds.has(e.data.target)
       );
       // Track hidden nodes and edges
-      setHiddenNodeCount(totalNodeCount - Object.keys(nodes).length);
-
+      
       // --- End sampling logic ---
 
       // Filter edges again after all node deletions to ensure no dangling references
@@ -568,8 +476,7 @@ function App() {
       edges = edges.filter(e =>
         nodeIdsFinal.has(e.data.source) && nodeIdsFinal.has(e.data.target)
       );
-      setHiddenEdgeCount(totalEdgeCount - edges.length);
-
+      
       // Fetch property labels with concurrency, 429 handling, and memoization
       const pidToLabel = {};
       await Promise.all(Array.from(propertyIds).map(pid =>
