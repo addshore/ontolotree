@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
+import ReactFlowGraph from './ReactFlowGraph';
 import md5 from 'md5';
 import pLimit from 'p-limit';
 import './App.css';
@@ -47,28 +48,33 @@ function commonsDirectUrl(url) {
   const first2 = hash.slice(0, 2);
   return `https://upload.wikimedia.org/wikipedia/commons/${first}/${first2}/${encodeURIComponent(filename)}`;
 }
-const layout = {
-  name: 'breadthfirst', // See https://js.cytoscape.org/#layouts/breadthfirst
-
-  fit: true, // whether to fit the viewport to the graph
-  directed: true, // whether the tree is directed downwards (or edges can point in any direction if false)
-  padding: 30, // padding on fit
-  circle: false, // put depths in concentric circles if true, put depths top down if false
-  grid: true, // whether to create an even grid into which the DAG is placed (circle:false only)
-  spacingFactor: 1.75, // positive spacing factor, larger => more space between nodes (N.B. n/a if causes overlap)
-  boundingBox: undefined, // constrain layout bounds; { x1, y1, x2, y2 } or { x1, y1, w, h }
-  avoidOverlap: true, // prevents node overlap, may overflow boundingBox if not enough space
-  nodeDimensionsIncludeLabels: false, // Excludes the label when calculating node bounding boxes for the layout algorithm
-  roots: undefined, // the roots of the trees
-  depthSort: undefined, // a sorting function to order nodes at equal depth. e.g. function(a, b){ return a.data('weight') - b.data('weight') }
-  animate: false, // whether to transition the node positions
-  animationDuration: 500, // duration of animation in ms if enabled
-  animationEasing: undefined, // easing of animation if enabled,
-  animateFilter: function ( node, i ){ return true; }, // a function that determines whether the node should be animated.  All nodes animated by default on animate enabled.  Non-animated nodes are positioned immediately when the layout starts
-  ready: undefined, // callback on layoutready
-  stop: undefined, // callback on layoutstop
-  transform: function (node, position ){ return position; } // transform a given node position. Useful for changing flow direction in discrete layouts0
-};
+function getLayout(elements) {
+  // If Q35120 ("entity") is present, force it as the root
+  const hasEntity = elements.some(
+    el => el.data && el.data.id === "Q35120"
+  );
+  return {
+    name: 'breadthfirst',
+    fit: true,
+    directed: true,
+    padding: 30,
+    circle: false,
+    grid: true,
+    spacingFactor: 1.75,
+    boundingBox: undefined,
+    avoidOverlap: true,
+    nodeDimensionsIncludeLabels: false,
+    roots: hasEntity ? ["Q35120"] : undefined,
+    depthSort: undefined,
+    animate: false,
+    animationDuration: 500,
+    animationEasing: undefined,
+    animateFilter: function (node, i) { return true; },
+    ready: undefined,
+    stop: undefined,
+    transform: function (node, position) { return position; }
+  };
+}
 const getStylesheet = (showImages, nodeSize) => [
   {
     selector: 'node[img]',
@@ -162,6 +168,7 @@ const getStylesheet = (showImages, nodeSize) => [
 function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
+  const [graphType, setGraphType] = useState('cytoscape'); // 'cytoscape' or 'reactflow'
   const [rootQids, setRootQids] = useState(() => {
     const stored = localStorage.getItem('ontolotree-rootQids');
     return stored ? stored.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid)) : ['Q144'];
@@ -907,6 +914,39 @@ function App() {
               />
               <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
             </div>
+            {/* Graph library selection */}
+            <div style={{ marginTop: 16 }}>
+              <label style={{ fontWeight: 'bold', marginRight: 8 }}>Graph Library:</label>
+              <button
+                onClick={() => setGraphType('cytoscape')}
+                style={{
+                  marginRight: 8,
+                  padding: '4px 14px',
+                  borderRadius: 4,
+                  border: graphType === 'cytoscape' ? '2px solid #0074D9' : '1px solid #bbb',
+                  background: graphType === 'cytoscape' ? '#e6f7ff' : '#fff',
+                  color: '#0074D9',
+                  fontWeight: graphType === 'cytoscape' ? 700 : 400,
+                  cursor: 'pointer'
+                }}
+              >
+                Cytoscape
+              </button>
+              <button
+                onClick={() => setGraphType('reactflow')}
+                style={{
+                  padding: '4px 14px',
+                  borderRadius: 4,
+                  border: graphType === 'reactflow' ? '2px solid #0074D9' : '1px solid #bbb',
+                  background: graphType === 'reactflow' ? '#e6f7ff' : '#fff',
+                  color: '#0074D9',
+                  fontWeight: graphType === 'reactflow' ? 700 : 400,
+                  cursor: 'pointer'
+                }}
+              >
+                React Flow
+              </button>
+            </div>
           </section>
           {/* Stats */}
           <section className="sidebar-section">
@@ -1033,16 +1073,20 @@ function App() {
       </Sidebar>
       {/* Main graph area */}
       <div className="main-content">
-        <CytoscapeComponent
-          key={layoutKey}
-          elements={elements}
-          layout={layout}
-          stylesheet={getStylesheet(showImages, nodeSize)}
-          style={{ width: '100%', height: '100%', background: '#fafafa' }}
-          cy={(cy) => {
-            cyRef.current = cy;
-          }}
-        />
+        {graphType === 'cytoscape' ? (
+          <CytoscapeComponent
+            key={layoutKey}
+            elements={elements}
+            layout={getLayout(elements)}
+            stylesheet={getStylesheet(showImages, nodeSize)}
+            style={{ width: '100%', height: '100%', background: '#fafafa' }}
+            cy={(cy) => {
+              cyRef.current = cy;
+            }}
+          />
+        ) : (
+          <ReactFlowGraph elements={elements} showImages={showImages} />
+        )}
       </div>
     </div>
   );
