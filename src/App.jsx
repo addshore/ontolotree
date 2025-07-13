@@ -106,13 +106,15 @@ const getStylesheet = (showImages) => [
       'text-halign': 'center',
       'text-margin-y': 10,
       'color': '#111',
-      'font-size': 18,
+      'font-size': 14,
       'font-weight': 'normal',
-      'width': 80,
-      'height': 80,
+      'width': 100,
+      'height': 100,
       'border-width': 6,
       'border-color': '#888',
       'shape': 'ellipse',
+      'text-wrap': 'wrap',
+      'text-max-width': '90px'
     }
   },
   {
@@ -248,6 +250,11 @@ function App() {
   const [hiddenEdgeCount, setHiddenEdgeCount] = useState(0);
   const [totalNodeCount, setTotalNodeCount] = useState(0);
   const [totalEdgeCount, setTotalEdgeCount] = useState(0);
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalData, setModalData] = useState(null);
+  const [allItems, setAllItems] = useState([]);
+  const cyRef = useRef(null);
 
   // Save settings to localStorage
   useEffect(() => {
@@ -265,6 +272,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ontolotree-showImages', showImages.toString());
   }, [showImages]);
+
+  // Trigger initial redraw if applied settings don't match localStorage
+  useEffect(() => {
+    const storedSampleRate = Number(localStorage.getItem('ontolotree-sampleRate')) || 100;
+    const storedSampleCount = Number(localStorage.getItem('ontolotree-sampleCount')) || 10;
+    if (appliedSampleRate !== storedSampleRate || appliedSampleCount !== storedSampleCount) {
+      setAppliedSampleRate(storedSampleRate);
+      setAppliedSampleCount(storedSampleCount);
+    }
+  }, []);
 
   // Redraw graph when rootQid or applied sample settings change
   useEffect(() => {
@@ -322,6 +339,14 @@ function App() {
       // 4. Build nodes and edges using P279 and P31 claims from JSON
       const nodes = {};
       // (removed duplicate declarations of edgeSet, edges, propertyIds)
+
+      // Store all items for modal
+      const allItemsData = Array.from(qids).map(qid => {
+        const itemJson = qidToItemJson[qid];
+        const label = getLabelFromItemJson(itemJson) || qid;
+        return { qid, label, itemJson };
+      });
+      setAllItems(allItemsData);
 
       // Add all nodes
       for (const qid of qids) {
@@ -463,6 +488,17 @@ function App() {
           delete nodes[qid];
         }
       }
+      
+      // Update labels with counts after removal
+      const shownCount = Object.keys(nodes).length;
+      const totalCount = qids.size;
+      for (const qid of Object.keys(nodes)) {
+        const itemJson = qidToItemJson[qid];
+        const label = getLabelFromItemJson(itemJson) || qid;
+        nodes[qid].data.label = `${shownCount}/${totalCount}\n${label}`;
+        nodes[qid].data.shownCount = shownCount;
+        nodes[qid].data.totalCount = totalCount;
+      }
       // --- End connectivity preservation ---
 
       // Add edges based on P279 and P31 claims (and collect property ids)
@@ -542,7 +578,7 @@ function App() {
   function handleInputKeyDown(e) {
     if (e.key === 'Enter') {
       const trimmed = inputQid.trim();
-      if (/^Q\\d+$/.test(trimmed)) {
+      if (/^Q\d+$/.test(trimmed)) {
         setRootQid(trimmed);
       }
     }
@@ -615,20 +651,24 @@ function App() {
             Show Images
           </label>
         </div>
-        <span style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500 }}>
-          Nodes: {elements.filter(el => el.data && el.data.id).length}
-          {hiddenNodeCount > 0 && (
-            <span style={{ color: '#ff9800', marginLeft: 6, fontSize: 14 }}>
-              (hidden: {hiddenNodeCount})
-            </span>
-          )}
-          {" | "}
-          Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}
-          {hiddenEdgeCount > 0 && (
-            <span style={{ color: '#ff9800', marginLeft: 6, fontSize: 14 }}>
-              (hidden: {hiddenEdgeCount})
-            </span>
-          )}
+        <span 
+          style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
+          onClick={() => {
+            const shownItems = allItems.filter(item => 
+              elements.some(el => el.data && el.data.id === item.qid)
+            );
+            const hiddenItems = allItems.filter(item => 
+              !elements.some(el => el.data && el.data.id === item.qid)
+            );
+            setModalData({
+              nodeLabel: `All Items (${rootQid})`,
+              shownItems,
+              hiddenItems
+            });
+            setModalOpen(true);
+          }}
+        >
+          Nodes: {elements.filter(el => el.data && el.data.id).length}/{totalNodeCount} | Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}/{totalEdgeCount}
         </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -638,8 +678,87 @@ function App() {
           layout={layout}
           stylesheet={getStylesheet(showImages)}
           style={{ width: '100vw', height: '100%', background: '#fafafa' }}
+          cy={(cy) => {
+            cyRef.current = cy;
+          }}
         />
       </div>
+      
+      {modalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '8px',
+            maxWidth: '80vw',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            minWidth: '500px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Node Details</h2>
+              <button 
+                onClick={() => setModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  padding: '0',
+                  width: '30px',
+                  height: '30px'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            {modalData && (
+              <div>
+                <p><strong>Selected:</strong> {modalData.nodeLabel}</p>
+                <p><strong>Shown:</strong> {modalData.shownItems.length} | <strong>Hidden:</strong> {modalData.hiddenItems.length}</p>
+                
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f5f5f5' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Status</th>
+                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>QID</th>
+                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Label</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modalData.shownItems.map(item => (
+                      <tr key={item.qid}>
+                        <td style={{ padding: '8px', border: '1px solid #ddd', color: 'green' }}>Shown</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.qid}</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.label}</td>
+                      </tr>
+                    ))}
+                    {modalData.hiddenItems.map(item => (
+                      <tr key={item.qid}>
+                        <td style={{ padding: '8px', border: '1px solid #ddd', color: 'red' }}>Hidden</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.qid}</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.label}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
