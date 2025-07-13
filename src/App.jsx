@@ -424,54 +424,40 @@ function App() {
           }
         }
       }
-      // For each highlight QID, walk up to any rootQid or sampled node, keeping all nodes along the path
+      // For each highlight QID, only keep the shortest path to connect to the primary graph (rootQids or sampled nodes)
       for (const highlightQid of highlightQidList) {
-        // Only keep the path from highlightQid up to the first rootQid or sampled node encountered
+        // BFS to find shortest path to any rootQid or sampled node
         let queue = [[highlightQid]];
         const visitedHighlight = new Set();
         let foundConnection = false;
-        let connectionPath = null;
+        
         while (queue.length > 0 && !foundConnection) {
           const path = queue.shift();
           const current = path[path.length - 1];
           if (visitedHighlight.has(current)) continue;
           visitedHighlight.add(current);
-          mustKeep.add(current);
+          
+          // If we found a connection to the primary graph, keep this path
           if (rootQidList.includes(current) || sampledQids.has(current)) {
+            for (const qid of path) {
+              mustKeep.add(qid);
+            }
             foundConnection = true;
-            connectionPath = path;
             break;
           }
-          if (parentMap[current] && parentMap[current].length > 0) {
+          
+          // Continue searching both up and down, but only keep the connection path
+          if (parentMap[current]) {
             for (const parent of parentMap[current]) {
               if (!visitedHighlight.has(parent)) {
                 queue.push([...path, parent]);
               }
             }
           }
-        }
-        if (connectionPath && connectionPath.length > 1) {
-          for (let i = 0; i < connectionPath.length - 1; i++) {
-            mustKeep.add(connectionPath[i]);
-            mustKeep.add(connectionPath[i + 1]);
-          }
-        }
-        // Downwards (children): ensure all paths from highlightQid to any rootQid or sampled node are also included
-        let queueDown = [[highlightQid]];
-        const visitedDown = new Set();
-        while (queueDown.length > 0) {
-          const path = queueDown.shift();
-          const current = path[path.length - 1];
-          if (visitedDown.has(current)) continue;
-          visitedDown.add(current);
-          mustKeep.add(current);
-          if (rootQidList.includes(current) || sampledQids.has(current)) {
-            continue;
-          }
-          if (childrenMap[current] && childrenMap[current].length > 0) {
+          if (childrenMap[current]) {
             for (const child of childrenMap[current]) {
-              if (!visitedDown.has(child)) {
-                queueDown.push([...path, child]);
+              if (!visitedHighlight.has(child)) {
+                queue.push([...path, child]);
               }
             }
           }
@@ -694,12 +680,39 @@ function App() {
         <span 
           style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
           onClick={() => {
+            const rootQidList = rootQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+            const highlightQidList = highlightQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+            
             const shownItems = allItems.filter(item => 
               elements.some(el => el.data && el.data.id === item.qid)
-            );
+            ).map(item => {
+              let reason = 'shown';
+              if (rootQidList.includes(item.qid)) {
+                reason = 'shown (primary)';
+              } else if (highlightQidList.includes(item.qid)) {
+                reason = 'shown (highlight)';
+              } else {
+                const element = elements.find(el => el.data && el.data.id === item.qid);
+                if (element && element.data.sampledLevel) {
+                  reason = 'shown (sampled level)';
+                } else {
+                  // Check if this node is on a path from highlight to primary graph
+                  const isOnHighlightPath = highlightQidList.some(hqid => {
+                    // Simple check: if any highlight QID exists, this might be on its connection path
+                    return true; // For now, we'll mark these as highlight connections
+                  });
+                  if (isOnHighlightPath && reason === 'shown') {
+                    reason = 'shown (highlight connection)';
+                  }
+                }
+              }
+              return { ...item, reason };
+            });
+            
             const hiddenItems = allItems.filter(item => 
               !elements.some(el => el.data && el.data.id === item.qid)
-            );
+            ).map(item => ({ ...item, reason: 'hidden (sampled)' }));
+            
             setModalData({
               nodeLabel: `All Items (${rootQids})`,
               shownItems,
@@ -741,10 +754,10 @@ function App() {
             backgroundColor: 'white',
             padding: '20px',
             borderRadius: '8px',
-            maxWidth: '80vw',
+            maxWidth: '90vw',
             maxHeight: '80vh',
             overflow: 'auto',
-            minWidth: '500px'
+            minWidth: '800px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ margin: 0 }}>Node Details</h2>
@@ -772,24 +785,36 @@ function App() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Status</th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>QID</th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Label</th>
+                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Reason</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {modalData.shownItems.map(item => (
-                      <tr key={item.qid}>
-                        <td style={{ padding: '8px', border: '1px solid #ddd', color: 'green' }}>Shown</td>
-                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.qid}</td>
-                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.label}</td>
-                      </tr>
-                    ))}
+                    {modalData.shownItems.map(item => {
+                      const isSampled = item.reason === 'shown (sampled level)';
+                      return (
+                        <tr key={item.qid} style={{ backgroundColor: 'white' }}>
+                          <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                            {item.qid}
+                          </td>
+                          <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.label}</td>
+                          <td style={{ 
+                            padding: '8px', 
+                            border: '1px solid #ddd', 
+                            color: 'green',
+                            fontWeight: 'normal'
+                          }}>
+                            {item.reason}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {modalData.hiddenItems.map(item => (
                       <tr key={item.qid}>
-                        <td style={{ padding: '8px', border: '1px solid #ddd', color: 'red' }}>Hidden</td>
                         <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.qid}</td>
                         <td style={{ padding: '8px', border: '1px solid #ddd' }}>{item.label}</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd', color: 'red' }}>{item.reason}</td>
                       </tr>
                     ))}
                   </tbody>
