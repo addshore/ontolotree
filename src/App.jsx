@@ -123,6 +123,15 @@ const stylesheet = [
     }
   },
   {
+    selector: 'node[sampledLevel]',
+    style: {
+      'border-color': '#ff9800',
+      'border-width': 10,
+      'border-style': 'double',
+      'background-color': '#fffbe6'
+    }
+  },
+  {
     selector: 'node:selected',
     style: {
       'border-color': '#0074D9',
@@ -228,7 +237,18 @@ function App() {
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
   const [rootQid, setRootQid] = useState('Q144'); // root QID, default Q144
   const [inputQid, setInputQid] = useState('Q144'); // for the input box
+  // Pending values for inputs
+  const [sampleRate, setSampleRate] = useState(100); // input value
+  const [sampleCount, setSampleCount] = useState(10); // input value
+  // Applied values for graph
+  const [appliedSampleRate, setAppliedSampleRate] = useState(100);
+  const [appliedSampleCount, setAppliedSampleCount] = useState(10);
+  const [hiddenNodeCount, setHiddenNodeCount] = useState(0);
+  const [hiddenEdgeCount, setHiddenEdgeCount] = useState(0);
+  const [totalNodeCount, setTotalNodeCount] = useState(0);
+  const [totalEdgeCount, setTotalEdgeCount] = useState(0);
 
+  // Redraw graph when rootQid or applied sample settings change
   useEffect(() => {
     async function fetchData() {
       // 1. Get all descendants (P279/P31) and all ancestors (reverse P279)
@@ -283,9 +303,8 @@ function App() {
       ));
       // 4. Build nodes and edges using P279 and P31 claims from JSON
       const nodes = {};
-      const edgeSet = new Set();
-      const edges = [];
-      const propertyIds = new Set();
+      // (removed duplicate declarations of edgeSet, edges, propertyIds)
+
       // Add all nodes
       for (const qid of qids) {
         const itemJson = qidToItemJson[qid];
@@ -301,14 +320,145 @@ function App() {
           }
         };
       }
-      // Add edges based on P279 and P31 claims (and collect property ids)
+
+      // --- Sampling logic by level ---
+      // 1. Build adjacency and reverse adjacency for BFS
+      const childrenMap = {};
+      const parentMap = {};
       for (const qid of qids) {
+        childrenMap[qid] = [];
+        parentMap[qid] = [];
+      }
+      for (const qid of qids) {
+        const itemJson = qidToItemJson[qid];
+        const p279s = itemJson?.statements?.P279 || [];
+        for (const claim of p279s) {
+          const parentQid = claim.value?.content;
+          if (parentQid && qids.has(parentQid)) {
+            childrenMap[parentQid].push(qid);
+            parentMap[qid].push(parentQid);
+          }
+        }
+        const p31s = itemJson?.statements?.P31 || [];
+        for (const claim of p31s) {
+          const parentQid = claim.value?.content;
+          if (parentQid && qids.has(parentQid)) {
+            childrenMap[parentQid].push(qid);
+            parentMap[qid].push(parentQid);
+          }
+        }
+      }
+      // 2. BFS from root to assign levels
+      const qidToLevel = {};
+      const levelToQids = {};
+      const visited = new Set();
+      const queue = [[rootQid, 0]];
+      while (queue.length > 0) {
+        const [qid, level] = queue.shift();
+        if (visited.has(qid)) continue;
+        visited.add(qid);
+        qidToLevel[qid] = level;
+        if (!levelToQids[level]) levelToQids[level] = [];
+        levelToQids[level].push(qid);
+        for (const child of childrenMap[qid]) {
+          queue.push([child, level + 1]);
+        }
+      }
+      // 3. Sample nodes per level if needed
+      const sampledLevels = new Set();
+      const sampledQids = new Set();
+
+      // Track all nodes and edges before sampling
+      setTotalNodeCount(Object.keys(nodes).length);
+
+      // We'll count edges before sampling as well
+      let allEdgesBefore = 0;
+      for (const qid of qids) {
+        const itemJson = qidToItemJson[qid];
+        const p279s = itemJson?.statements?.P279 || [];
+        allEdgesBefore += p279s.length;
+        const p31s = itemJson?.statements?.P31 || [];
+        allEdgesBefore += p31s.length;
+      }
+      setTotalEdgeCount(allEdgesBefore);
+
+      for (const [levelStr, qidArr] of Object.entries(levelToQids)) {
+        const level = Number(levelStr);
+        if (qidArr.length > appliedSampleCount) {
+          sampledLevels.add(level);
+          // Shuffle and sample
+          const shuffled = [...qidArr].sort(() => Math.random() - 0.5);
+          const keepCount = Math.ceil((appliedSampleRate / 100) * qidArr.length);
+          const keepSet = new Set(shuffled.slice(0, keepCount));
+          for (const qid of qidArr) {
+            if (keepSet.has(qid)) {
+              nodes[qid].data.sampledLevel = true;
+              sampledQids.add(qid);
+            }
+          }
+        } else {
+          for (const qid of qidArr) {
+            sampledQids.add(qid);
+          }
+        }
+      }
+
+      // --- Connectivity preservation: keep all nodes on paths from root to sampled nodes ---
+      // BFS from each sampled node up to root, and from root down to sampled nodes
+      const mustKeep = new Set();
+      // Upwards: for each sampled node, walk up to root
+      for (const qid of sampledQids) {
+        let current = qid;
+        while (current && !mustKeep.has(current)) {
+          mustKeep.add(current);
+          // Go to parent (pick first parent if multiple, or all)
+          if (parentMap[current] && parentMap[current].length > 0) {
+            // Add all parents to mustKeep and continue up
+            for (const parent of parentMap[current]) {
+              if (!mustKeep.has(parent)) {
+                mustKeep.add(parent);
+                current = parent;
+              }
+            }
+            // After adding all parents, break to avoid infinite loop
+            break;
+          } else {
+            break;
+          }
+        }
+      }
+      // Downwards: BFS from root, only keep paths that reach sampled nodes
+      const queue2 = [rootQid];
+      while (queue2.length > 0) {
+        const qid = queue2.shift();
+        if (!mustKeep.has(qid)) continue;
+        for (const child of childrenMap[qid] || []) {
+          if (sampledQids.has(child) || mustKeep.has(child)) {
+            mustKeep.add(child);
+            queue2.push(child);
+          }
+        }
+      }
+      // Remove nodes not in mustKeep
+      for (const qid of Object.keys(nodes)) {
+        if (!mustKeep.has(qid)) {
+          delete nodes[qid];
+        }
+      }
+      // --- End connectivity preservation ---
+
+      // Add edges based on P279 and P31 claims (and collect property ids)
+      const edgeSet = new Set();
+      let edges = [];
+      const propertyIds = new Set();
+      for (const qid of qids) {
+        if (!nodes[qid]) continue;
         const itemJson = qidToItemJson[qid];
         // P279 edges
         const p279s = itemJson?.statements?.P279 || [];
         for (const claim of p279s) {
           const parentQid = claim.value?.content;
-          if (parentQid && qids.has(parentQid)) {
+          if (parentQid && qids.has(parentQid) && nodes[parentQid] && nodes[qid]) {
             const pid = 'P279';
             propertyIds.add(pid);
             const edgeKey = `${parentQid}->${qid}->${pid}`;
@@ -322,7 +472,7 @@ function App() {
         const p31s = itemJson?.statements?.P31 || [];
         for (const claim of p31s) {
           const parentQid = claim.value?.content;
-          if (parentQid && qids.has(parentQid)) {
+          if (parentQid && qids.has(parentQid) && nodes[parentQid] && nodes[qid]) {
             const pid = 'P31';
             propertyIds.add(pid);
             const edgeKey = `${parentQid}->${qid}->${pid}`;
@@ -333,6 +483,23 @@ function App() {
           }
         }
       }
+      // Filter edges to only those with both source and target present in nodes
+      const nodeIds = new Set(Object.keys(nodes));
+      edges = edges.filter(e =>
+        nodeIds.has(e.data.source) && nodeIds.has(e.data.target)
+      );
+      // Track hidden nodes and edges
+      setHiddenNodeCount(totalNodeCount - Object.keys(nodes).length);
+
+      // --- End sampling logic ---
+
+      // Filter edges again after all node deletions to ensure no dangling references
+      const nodeIdsFinal = new Set(Object.keys(nodes));
+      edges = edges.filter(e =>
+        nodeIdsFinal.has(e.data.source) && nodeIdsFinal.has(e.data.target)
+      );
+      setHiddenEdgeCount(totalEdgeCount - edges.length);
+
       // Fetch property labels with concurrency, 429 handling, and memoization
       const pidToLabel = {};
       await Promise.all(Array.from(propertyIds).map(pid =>
@@ -348,7 +515,7 @@ function App() {
       setLayoutKey(prev => prev + 1);
     }
     fetchData();
-  }, [rootQid]);
+  }, [rootQid, appliedSampleRate, appliedSampleCount]);
 
   // Handler for input box
   function handleInputChange(e) {
@@ -376,9 +543,63 @@ function App() {
           style={{ fontSize: 18, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: 120 }}
           placeholder="Q144"
         />
-        <span style={{ marginLeft: 12, color: '#888', fontSize: 14 }}>Press Enter to update</span>
+        <div style={{ marginLeft: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label htmlFor="sample-rate" style={{ fontWeight: 'bold', marginRight: 4 }}>Sample Rate:</label>
+          <input
+            id="sample-rate"
+            type="number"
+            min={0}
+            max={100}
+            value={sampleRate}
+            onChange={e => setSampleRate(Math.max(0, Math.min(100, Number(e.target.value))))}
+            style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15 }}
+          />
+          <span style={{ marginRight: 8 }}>%</span>
+          <label htmlFor="sample-count" style={{ fontWeight: 'bold', marginRight: 4 }}>Count:</label>
+          <input
+            id="sample-count"
+            type="number"
+            min={1}
+            value={sampleCount}
+            onChange={e => setSampleCount(Math.max(1, Number(e.target.value)))}
+            style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15 }}
+          />
+          <button
+            style={{
+              marginLeft: 12,
+              padding: '4px 14px',
+              fontSize: 15,
+              borderRadius: 4,
+              border: '1px solid #888',
+              background: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? '#0074D9' : '#ccc',
+              color: '#fff',
+              fontWeight: 600,
+              cursor: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? 'pointer' : 'not-allowed',
+              transition: 'background 0.2s'
+            }}
+            disabled={!(sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount)}
+            onClick={() => {
+              setAppliedSampleRate(sampleRate);
+              setAppliedSampleCount(sampleCount);
+            }}
+          >
+            Redraw Graph
+          </button>
+        </div>
         <span style={{ marginLeft: 'auto', color: '#333', fontSize: 15, fontWeight: 500 }}>
-          Nodes: {elements.filter(el => el.data && el.data.id).length} | Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}
+          Nodes: {elements.filter(el => el.data && el.data.id).length}
+          {hiddenNodeCount > 0 && (
+            <span style={{ color: '#ff9800', marginLeft: 6, fontSize: 14 }}>
+              (hidden: {hiddenNodeCount})
+            </span>
+          )}
+          {" | "}
+          Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}
+          {hiddenEdgeCount > 0 && (
+            <span style={{ color: '#ff9800', marginLeft: 6, fontSize: 14 }}>
+              (hidden: {hiddenEdgeCount})
+            </span>
+          )}
         </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
