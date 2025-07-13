@@ -431,41 +431,48 @@ function App() {
           }
         }
       }
-      // For each highlight QID, only keep the shortest path to connect to the primary graph (rootQids or sampled nodes)
+      // For each highlight QID, keep all shortest paths to each root QID
       for (const highlightQid of highlightQidList) {
-        // BFS to find shortest path to any rootQid or sampled node
-        let queue = [[highlightQid]];
-        const visitedHighlight = new Set();
-        let foundConnection = false;
-        
-        while (queue.length > 0 && !foundConnection) {
-          const path = queue.shift();
-          const current = path[path.length - 1];
-          if (visitedHighlight.has(current)) continue;
-          visitedHighlight.add(current);
-          
-          // If we found a connection to the primary graph, keep this path
-          if (rootQidList.includes(current) || sampledQids.has(current)) {
+        for (const rootQid of rootQidList) {
+          // BFS for shortest path from highlightQid to rootQid
+          let queue = [[highlightQid]];
+          const visited = new Set();
+          let shortestPaths = [];
+          let minLen = Infinity;
+          while (queue.length > 0) {
+            const path = queue.shift();
+            const current = path[path.length - 1];
+            if (visited.has(current)) continue;
+            visited.add(current);
+            if (current === rootQid) {
+              if (path.length < minLen) {
+                shortestPaths = [path];
+                minLen = path.length;
+              } else if (path.length === minLen) {
+                shortestPaths.push(path);
+              }
+              continue;
+            }
+            // Continue searching both up and down
+            if (parentMap[current]) {
+              for (const parent of parentMap[current]) {
+                if (!visited.has(parent)) {
+                  queue.push([...path, parent]);
+                }
+              }
+            }
+            if (childrenMap[current]) {
+              for (const child of childrenMap[current]) {
+                if (!visited.has(child)) {
+                  queue.push([...path, child]);
+                }
+              }
+            }
+          }
+          // Add all nodes on all shortest paths
+          for (const path of shortestPaths) {
             for (const qid of path) {
               mustKeep.add(qid);
-            }
-            foundConnection = true;
-            break;
-          }
-          
-          // Continue searching both up and down, but only keep the connection path
-          if (parentMap[current]) {
-            for (const parent of parentMap[current]) {
-              if (!visitedHighlight.has(parent)) {
-                queue.push([...path, parent]);
-              }
-            }
-          }
-          if (childrenMap[current]) {
-            for (const child of childrenMap[current]) {
-              if (!visitedHighlight.has(child)) {
-                queue.push([...path, child]);
-              }
             }
           }
         }
@@ -957,6 +964,52 @@ function App() {
                 </table>
               </>
             )}
+          </div>
+          {/* Minimal raw data for LLM */}
+          <div style={{ marginTop: 12 }}>
+            <label style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 2, display: 'block' }}>
+              Raw node/edge state (for LLM):
+            </label>
+            <textarea
+              readOnly
+              style={{
+                width: '100%',
+                minHeight: 90,
+                fontFamily: 'monospace',
+                fontSize: 12,
+                background: '#f7f7f7',
+                border: '1px solid #bbb',
+                borderRadius: 4,
+                resize: 'vertical',
+                color: '#222',
+                padding: 6,
+                marginTop: 2
+              }}
+              value={
+                (() => {
+                  // Nodes
+                  const shown = (sidebarTableData?.shownItems || []).map(
+                    n => `${n.qid} ${n.reason.replace('shown ', 's:').replace('shown', 's')}`
+                  );
+                  const hidden = (sidebarTableData?.hiddenItems || []).map(
+                    n => `${n.qid} h:${n.reason.replace('hidden ', '')}`
+                  );
+                  // Edges
+                  const edgeLines = (elements || [])
+                    .filter(e => e.data && e.data.source && e.data.target)
+                    .map(e =>
+                      `${e.data.source}->${e.data.target} [${e.data.property || ''}]`
+                    );
+                  return [
+                    '# Nodes:',
+                    ...shown,
+                    ...hidden,
+                    '# Edges:',
+                    ...edgeLines
+                  ].join('\n');
+                })()
+              }
+            />
           </div>
         </div>
         {/* Resizer handle */}
