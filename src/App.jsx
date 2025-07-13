@@ -3,6 +3,8 @@ import CytoscapeComponent from 'react-cytoscapejs';
 import md5 from 'md5';
 import pLimit from 'p-limit';
 import './App.css';
+import { Sidebar } from 'primereact/sidebar';
+import { Button } from 'primereact/button';
 import {
   fetchWithBackoff,
   fetchWikidataItemJsonMemo,
@@ -609,8 +611,32 @@ function App() {
   }
 
   // Sidebar collapse state
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  // Table data for sidebar (always visible)
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(340);
+  const [isResizing, setIsResizing] = useState(false);
+
+  // Handle sidebar resizing with window listeners
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (isResizing) {
+        e.preventDefault();
+        const minW = 220;
+        const maxW = 600;
+        setSidebarWidth(Math.max(minW, Math.min(maxW, e.clientX)));
+      }
+    }
+    function onMouseUp() {
+      if (isResizing) setIsResizing(false);
+    }
+    if (isResizing) {
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isResizing]);
   const [sidebarTableData, setSidebarTableData] = useState(null);
 
   // Compute sidebar table data on elements/allItems/rootQids/highlightQids change
@@ -649,136 +675,154 @@ function App() {
   }, [elements, allItems, rootQids, highlightQids]);
 
   return (
-    <div className="App" style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, background: '#fafafa', display: 'flex', flexDirection: 'row' }}>
-      {/* Sidebar */}
-      <div className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
-        <button
-          className="sidebar-toggle"
-          onClick={() => setSidebarCollapsed(c => !c)}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {sidebarCollapsed ? '→' : '←'}
-        </button>
-        {!sidebarCollapsed && (
-          <div className="sidebar-content">
-            {/* Inputs */}
-            <section className="sidebar-section">
-              <h3>Inputs</h3>
-              <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>IDs:</label>
+    <div
+      className="App"
+      style={{
+        width: '100vw',
+        height: '100vh',
+        margin: 0,
+        padding: 0,
+        background: '#fafafa',
+        display: 'flex',
+        flexDirection: 'row',
+        userSelect: isResizing ? 'none' : undefined
+      }}
+      // Remove onMouseMove and onMouseUp from here
+    >
+      <Button icon="pi pi-bars" className="menu-toggle-btn" onClick={() => setSidebarVisible(true)} />
+      <Sidebar
+        visible={sidebarVisible}
+        onHide={() => { if (!isResizing) setSidebarVisible(false); }}
+        showCloseIcon={false}
+        blockScroll={false}
+        dismissable={false}
+        style={{ width: sidebarWidth, zIndex: 11, paddingRight: 0 }}
+        className="custom-sidebar"
+        modal={false}
+      >
+        <Button
+          icon="pi pi-times"
+          className="p-button-rounded p-button-text"
+          style={{ position: 'absolute', top: 8, left: 8, zIndex: 20 }}
+          onClick={() => setSidebarVisible(false)}
+          aria-label="Close"
+        />
+        <div className="sidebar-content">
+          {/* Inputs */}
+          <section className="sidebar-section">
+            <h3>Inputs</h3>
+            <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>IDs:</label>
+            <input
+              id="qid-input"
+              type="text"
+              value={inputQids}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
+              style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', marginBottom: 8 }}
+              placeholder="Q144,Q5"
+            />
+            <label htmlFor="highlight-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8, color: 'green' }}>Highlight IDs:</label>
+            <input
+              id="highlight-qid-input"
+              type="text"
+              value={inputHighlightQids}
+              onChange={handleHighlightInputChange}
+              onKeyDown={handleHighlightInputKeyDown}
+              style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', background: '#eaffea' }}
+              placeholder="Q42,Q1"
+            />
+          </section>
+          {/* Filtering */}
+          <section className="sidebar-section">
+            <h3>Filtering</h3>
+            <label htmlFor="sample-rate" style={{ fontWeight: 'bold', marginRight: 4 }}>Sample Rate:</label>
+            <input
+              id="sample-rate"
+              type="number"
+              min={0}
+              max={100}
+              value={sampleRate}
+              onChange={e => setSampleRate(Math.max(0, Math.min(100, Number(e.target.value))))}
+              style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
+            />
+            <span style={{ marginRight: 8 }}>%</span>
+            <label htmlFor="sample-count" style={{ fontWeight: 'bold', marginRight: 4 }}>Count:</label>
+            <input
+              id="sample-count"
+              type="number"
+              min={1}
+              value={sampleCount}
+              onChange={e => setSampleCount(Math.max(1, Number(e.target.value)))}
+              style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
+            />
+            <button
+              style={{
+                marginLeft: 0,
+                marginTop: 8,
+                padding: '4px 14px',
+                fontSize: 15,
+                borderRadius: 4,
+                border: '1px solid #888',
+                background: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? '#0074D9' : '#ccc',
+                color: '#fff',
+                fontWeight: 600,
+                cursor: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? 'pointer' : 'not-allowed',
+                transition: 'background 0.2s'
+              }}
+              disabled={!(sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount)}
+              onClick={() => {
+                setAppliedSampleRate(sampleRate);
+                setAppliedSampleCount(sampleCount);
+              }}
+            >
+              Redraw Graph
+            </button>
+          </section>
+          {/* Display */}
+          <section className="sidebar-section">
+            <h3>Display</h3>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
               <input
-                id="qid-input"
-                type="text"
-                value={inputQids}
-                onChange={handleInputChange}
-                onKeyDown={handleInputKeyDown}
-                style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', marginBottom: 8 }}
-                placeholder="Q144,Q5"
+                type="checkbox"
+                checked={showImages}
+                onChange={e => setShowImages(e.target.checked)}
+                style={{ marginRight: 6 }}
               />
-              <label htmlFor="highlight-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8, color: 'green' }}>Highlight IDs:</label>
+              Show Images
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label htmlFor="node-size" style={{ fontWeight: 'bold' }}>Node Size:</label>
               <input
-                id="highlight-qid-input"
-                type="text"
-                value={inputHighlightQids}
-                onChange={handleHighlightInputChange}
-                onKeyDown={handleHighlightInputKeyDown}
-                style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', background: '#eaffea' }}
-                placeholder="Q42,Q1"
+                id="node-size"
+                type="range"
+                min={50}
+                max={200}
+                value={nodeSize}
+                onChange={e => setNodeSize(Number(e.target.value))}
+                style={{ width: 80 }}
               />
-            </section>
-            {/* Filtering */}
-            <section className="sidebar-section">
-              <h3>Filtering</h3>
-              <label htmlFor="sample-rate" style={{ fontWeight: 'bold', marginRight: 4 }}>Sample Rate:</label>
-              <input
-                id="sample-rate"
-                type="number"
-                min={0}
-                max={100}
-                value={sampleRate}
-                onChange={e => setSampleRate(Math.max(0, Math.min(100, Number(e.target.value))))}
-                style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
-              />
-              <span style={{ marginRight: 8 }}>%</span>
-              <label htmlFor="sample-count" style={{ fontWeight: 'bold', marginRight: 4 }}>Count:</label>
-              <input
-                id="sample-count"
-                type="number"
-                min={1}
-                value={sampleCount}
-                onChange={e => setSampleCount(Math.max(1, Number(e.target.value)))}
-                style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
-              />
-              <button
-                style={{
-                  marginLeft: 0,
-                  marginTop: 8,
-                  padding: '4px 14px',
-                  fontSize: 15,
-                  borderRadius: 4,
-                  border: '1px solid #888',
-                  background: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? '#0074D9' : '#ccc',
-                  color: '#fff',
-                  fontWeight: 600,
-                  cursor: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? 'pointer' : 'not-allowed',
-                  transition: 'background 0.2s'
-                }}
-                disabled={!(sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount)}
-                onClick={() => {
-                  setAppliedSampleRate(sampleRate);
-                  setAppliedSampleCount(sampleCount);
-                }}
-              >
-                Redraw Graph
-              </button>
-            </section>
-            {/* Display */}
-            <section className="sidebar-section">
-              <h3>Display</h3>
-              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={showImages}
-                  onChange={e => setShowImages(e.target.checked)}
-                  style={{ marginRight: 6 }}
-                />
-                Show Images
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label htmlFor="node-size" style={{ fontWeight: 'bold' }}>Node Size:</label>
-                <input
-                  id="node-size"
-                  type="range"
-                  min={50}
-                  max={200}
-                  value={nodeSize}
-                  onChange={e => setNodeSize(Number(e.target.value))}
-                  style={{ width: 80 }}
-                />
-                <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
-              </div>
-            </section>
-            {/* Stats */}
-            <section className="sidebar-section">
-              <h3>Stats</h3>
-              <span className="sidebar-stats">
-                Nodes: {elements.filter(el => el.data && el.data.id).length}/{totalNodeCount}
-                <br />
-                Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}/{totalEdgeCount}
-              </span>
-            </section>
-          </div>
-        )}
-        {/* Table always at bottom */}
-        <div className="sidebar-table">
-          {sidebarTableData && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <strong>{sidebarTableData.nodeLabel}</strong>
-              </div>
-              <div style={{ fontSize: 13, marginBottom: 6 }}>
-                <span><strong>Shown:</strong> {sidebarTableData.shownItems.length} | <strong>Hidden:</strong> {sidebarTableData.hiddenItems.length}</span>
-              </div>
-              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
+            </div>
+          </section>
+          {/* Stats */}
+          <section className="sidebar-section">
+            <h3>Stats</h3>
+            <span className="sidebar-stats">
+              Nodes: {elements.filter(el => el.data && el.data.id).length}/{totalNodeCount}
+              <br />
+              Edges: {elements.filter(el => el.data && el.data.source && el.data.target).length}/{totalEdgeCount}
+            </span>
+          </section>
+          {/* Table always at bottom */}
+          <div className="sidebar-table">
+            {sidebarTableData && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <strong>{sidebarTableData.nodeLabel}</strong>
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 6 }}>
+                  <span><strong>Shown:</strong> {sidebarTableData.shownItems.length} | <strong>Hidden:</strong> {sidebarTableData.hiddenItems.length}</span>
+                </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ backgroundColor: '#f5f5f5' }}>
@@ -804,11 +848,27 @@ function App() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
+        {/* Resizer handle */}
+        <div
+          className="sidebar-resizer"
+          onMouseDown={e => { e.preventDefault(); setIsResizing(true); }}
+          style={{
+            cursor: 'col-resize',
+            width: 6,
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 12,
+            background: isResizing ? '#b3d4fc' : 'transparent',
+            transition: 'background 0.2s'
+          }}
+        />
+      </Sidebar>
       {/* Main graph area */}
       <div className="main-content">
         <CytoscapeComponent
