@@ -107,6 +107,17 @@ const getStylesheet = (showImages, nodeSize) => [
     }
   },
   {
+    selector: 'node[type = "highlight"]',
+    style: {
+      'border-color': '#00ff00',
+      'border-width': 12,
+      'border-style': 'double',
+      'background-color': '#e8f5e8',
+      'font-weight': 'bold',
+      'color': '#006600'
+    }
+  },
+  {
     selector: 'node[sampledLevel]',
     style: {
       'border-color': '#ccc'
@@ -151,6 +162,8 @@ function App() {
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
   const [rootQids, setRootQids] = useState(() => localStorage.getItem('ontolotree-rootQids') || 'Q144');
   const [inputQids, setInputQids] = useState(() => localStorage.getItem('ontolotree-rootQids') || 'Q144');
+  const [highlightQids, setHighlightQids] = useState(() => localStorage.getItem('ontolotree-highlightQids') || '');
+  const [inputHighlightQids, setInputHighlightQids] = useState(() => localStorage.getItem('ontolotree-highlightQids') || '');
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
   // Pending values for inputs
@@ -159,7 +172,7 @@ function App() {
   // Applied values for graph
   const [appliedSampleRate, setAppliedSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [appliedSampleCount, setAppliedSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
-    const [totalNodeCount, setTotalNodeCount] = useState(0);
+  const [totalNodeCount, setTotalNodeCount] = useState(0);
   const [totalEdgeCount, setTotalEdgeCount] = useState(0);
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -171,6 +184,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ontolotree-rootQids', rootQids);
   }, [rootQids]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-highlightQids', highlightQids);
+  }, [highlightQids]);
 
   useEffect(() => {
     localStorage.setItem('ontolotree-sampleRate', sampleRate.toString());
@@ -203,6 +220,7 @@ function App() {
     async function fetchData() {
       // Parse comma-separated QIDs
       const rootQidList = rootQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
+      const highlightQidList = highlightQids.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid));
       if (rootQidList.length === 0) return;
       
       // 1. Get all descendants (P279/P31) and all ancestors (reverse P279) for all root QIDs
@@ -245,6 +263,10 @@ function App() {
         });
         qids.add(rootQid);
       }
+      // Always add highlight QIDs (so they're always shown)
+      for (const qid of highlightQidList) {
+        qids.add(qid);
+      }
       // Remove everything from Qids that isnt Q\d+
       const qidRegex = /^Q\d+$/;
       qids.forEach(qid => {
@@ -278,13 +300,19 @@ function App() {
         const itemJson = qidToItemJson[qid];
         const label = getLabelFromItemJson(itemJson) || qid;
         const img = getImageFilenameFromItemJson(itemJson);
+        let nodeType = undefined;
+        if (rootQidList.includes(qid)) {
+          nodeType = 'root';
+        } else if (highlightQidList.includes(qid)) {
+          nodeType = 'highlight';
+        }
         nodes[qid] = {
           data: {
             id: qid,
             label: qid + ': ' + label,
             img: img ? commonsDirectUrl('File:' + img) : undefined,
             itemJson,
-            type: rootQidList.includes(qid) ? 'root' : undefined
+            type: nodeType
           }
         };
       }
@@ -374,6 +402,10 @@ function App() {
       // --- Connectivity preservation: keep all nodes on paths from root to sampled nodes ---
       // BFS from each sampled node up to root, and from root down to sampled nodes
       const mustKeep = new Set();
+      // Always keep highlight QIDs
+      for (const qid of highlightQidList) {
+        mustKeep.add(qid);
+      }
       // Upwards: for each sampled node, walk up to root
       for (const qid of sampledQids) {
         let current = qid;
@@ -507,6 +539,14 @@ function App() {
       }
     }
   }
+  function handleHighlightInputChange(e) {
+    setInputHighlightQids(e.target.value);
+  }
+  function handleHighlightInputKeyDown(e) {
+    if (e.key === 'Enter') {
+      setHighlightQids(inputHighlightQids.trim());
+    }
+  }
 
   return (
     <div className="App" style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
@@ -520,6 +560,16 @@ function App() {
           onKeyDown={handleInputKeyDown}
           style={{ fontSize: 18, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: 180 }}
           placeholder="Q144,Q5"
+        />
+        <label htmlFor="highlight-qid-input" style={{ fontWeight: 'bold', marginLeft: 16, marginRight: 8, color: 'green' }}>Highlight IDs:</label>
+        <input
+          id="highlight-qid-input"
+          type="text"
+          value={inputHighlightQids}
+          onChange={handleHighlightInputChange}
+          onKeyDown={handleHighlightInputKeyDown}
+          style={{ fontSize: 18, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: 180, background: '#eaffea' }}
+          placeholder="Q42,Q1"
         />
         <div style={{ marginLeft: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
           <label htmlFor="sample-rate" style={{ fontWeight: 'bold', marginRight: 4 }}>Sample Rate:</label>
