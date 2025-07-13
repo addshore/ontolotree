@@ -763,16 +763,33 @@ function App() {
                 fontSize: 15,
                 borderRadius: 4,
                 border: '1px solid #888',
-                background: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? '#0074D9' : '#ccc',
+                background: (
+                  sampleRate !== appliedSampleRate ||
+                  sampleCount !== appliedSampleCount ||
+                  inputQids !== rootQids ||
+                  inputHighlightQids !== highlightQids
+                ) ? '#0074D9' : '#ccc',
                 color: '#fff',
                 fontWeight: 600,
-                cursor: (sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount) ? 'pointer' : 'not-allowed',
+                cursor: (
+                  sampleRate !== appliedSampleRate ||
+                  sampleCount !== appliedSampleCount ||
+                  inputQids !== rootQids ||
+                  inputHighlightQids !== highlightQids
+                ) ? 'pointer' : 'not-allowed',
                 transition: 'background 0.2s'
               }}
-              disabled={!(sampleRate !== appliedSampleRate || sampleCount !== appliedSampleCount)}
+              disabled={!(
+                sampleRate !== appliedSampleRate ||
+                sampleCount !== appliedSampleCount ||
+                inputQids !== rootQids ||
+                inputHighlightQids !== highlightQids
+              )}
               onClick={() => {
                 setAppliedSampleRate(sampleRate);
                 setAppliedSampleCount(sampleCount);
+                if (inputQids !== rootQids) setRootQids(inputQids);
+                if (inputHighlightQids !== highlightQids) setHighlightQids(inputHighlightQids);
               }}
             >
               Redraw Graph
