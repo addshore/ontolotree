@@ -399,7 +399,7 @@ function App() {
         }
       }
 
-      // --- Connectivity preservation: keep all nodes on paths from root to sampled nodes ---
+      // --- Connectivity preservation: keep all nodes on paths from root to sampled nodes and highlight QIDs ---
       // BFS from each sampled node up to root, and from root down to sampled nodes
       const mustKeep = new Set();
       // Always keep highlight QIDs
@@ -411,29 +411,79 @@ function App() {
         let current = qid;
         while (current && !mustKeep.has(current)) {
           mustKeep.add(current);
-          // Go to parent (pick first parent if multiple, or all)
           if (parentMap[current] && parentMap[current].length > 0) {
-            // Add all parents to mustKeep and continue up
             for (const parent of parentMap[current]) {
               if (!mustKeep.has(parent)) {
                 mustKeep.add(parent);
                 current = parent;
               }
             }
-            // After adding all parents, break to avoid infinite loop
             break;
           } else {
             break;
           }
         }
       }
-      // Downwards: BFS from all roots, only keep paths that reach sampled nodes
-      const queue2 = [...rootQidList];
+      // For each highlight QID, walk up to any rootQid or sampled node, keeping all nodes along the path
+      for (const highlightQid of highlightQidList) {
+        // Only keep the path from highlightQid up to the first rootQid or sampled node encountered
+        let queue = [[highlightQid]];
+        const visitedHighlight = new Set();
+        let foundConnection = false;
+        let connectionPath = null;
+        while (queue.length > 0 && !foundConnection) {
+          const path = queue.shift();
+          const current = path[path.length - 1];
+          if (visitedHighlight.has(current)) continue;
+          visitedHighlight.add(current);
+          mustKeep.add(current);
+          if (rootQidList.includes(current) || sampledQids.has(current)) {
+            foundConnection = true;
+            connectionPath = path;
+            break;
+          }
+          if (parentMap[current] && parentMap[current].length > 0) {
+            for (const parent of parentMap[current]) {
+              if (!visitedHighlight.has(parent)) {
+                queue.push([...path, parent]);
+              }
+            }
+          }
+        }
+        if (connectionPath && connectionPath.length > 1) {
+          for (let i = 0; i < connectionPath.length - 1; i++) {
+            mustKeep.add(connectionPath[i]);
+            mustKeep.add(connectionPath[i + 1]);
+          }
+        }
+        // Downwards (children): ensure all paths from highlightQid to any rootQid or sampled node are also included
+        let queueDown = [[highlightQid]];
+        const visitedDown = new Set();
+        while (queueDown.length > 0) {
+          const path = queueDown.shift();
+          const current = path[path.length - 1];
+          if (visitedDown.has(current)) continue;
+          visitedDown.add(current);
+          mustKeep.add(current);
+          if (rootQidList.includes(current) || sampledQids.has(current)) {
+            continue;
+          }
+          if (childrenMap[current] && childrenMap[current].length > 0) {
+            for (const child of childrenMap[current]) {
+              if (!visitedDown.has(child)) {
+                queueDown.push([...path, child]);
+              }
+            }
+          }
+        }
+      }
+      // Downwards: BFS from all roots, only keep paths that reach sampled nodes or highlight QIDs
+      const queue2 = [...rootQidList, ...highlightQidList];
       while (queue2.length > 0) {
         const qid = queue2.shift();
         if (!mustKeep.has(qid)) continue;
         for (const child of childrenMap[qid] || []) {
-          if (sampledQids.has(child) || mustKeep.has(child)) {
+          if (sampledQids.has(child) || mustKeep.has(child) || highlightQidList.includes(child)) {
             mustKeep.add(child);
             queue2.push(child);
           }
@@ -445,6 +495,9 @@ function App() {
           delete nodes[qid];
         }
       }
+
+      // Ensure all edges along highlight-to-root paths are present
+      // (edges are added later, but we need to ensure both nodes are present, which is now done)
       
       // Update labels with counts after removal
       const shownCount = Object.keys(nodes).length;
