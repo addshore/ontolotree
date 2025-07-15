@@ -45,7 +45,7 @@ function ImageNode({ data }) {
  * Convert Cytoscape elements to React Flow nodes and edges,
  * and arrange nodes in a simple vertical tree layout.
  */
-function convertElementsToReactFlow(elements, showImages, forceEntityRoot) {
+function convertElementsToReactFlow(elements, showImages) {
   const nodes = [];
   const edges = [];
   const nodeMap = {};
@@ -91,15 +91,9 @@ function convertElementsToReactFlow(elements, showImages, forceEntityRoot) {
     parentMap[e.target].push(e.source);
   });
 
-  // Optionally force "entity" (Q35120) as the only root if present
-  const forcedRoot = "Q35120";
-  if (forceEntityRoot && nodeMap[forcedRoot]) {
-    levelMap[forcedRoot] = 0;
-  } else {
-    roots.forEach(rootId => {
-      levelMap[rootId] = 0;
-    });
-  }
+  roots.forEach(rootId => {
+    levelMap[rootId] = 0;
+  });
 
   // Propagate levels: for each node, level = min(parent levels) + 1
   let changed = true;
@@ -158,11 +152,11 @@ function convertElementsToReactFlow(elements, showImages, forceEntityRoot) {
   return { nodes, edges };
 }
 
-export default function ReactFlowGraph({ elements, showImages, forceEntityRoot, showFitButton }) {
+export default function ReactFlowGraph({ elements, showImages, showFitButton }) {
   const nodeTypes = useMemo(() => ({ imageNode: ImageNode }), []);
   const { nodes, edges } = useMemo(
-    () => convertElementsToReactFlow(elements, showImages, forceEntityRoot),
-    [elements, showImages, forceEntityRoot]
+    () => convertElementsToReactFlow(elements, showImages),
+    [elements, showImages]
   );
 
   return (

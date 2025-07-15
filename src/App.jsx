@@ -48,11 +48,7 @@ function commonsDirectUrl(url) {
   const first2 = hash.slice(0, 2);
   return `https://upload.wikimedia.org/wikipedia/commons/${first}/${first2}/${encodeURIComponent(filename)}`;
 }
-function getLayout(elements, forceEntityRoot) {
-  // If Q35120 ("entity") is present and forced, use as root
-  const hasEntity = elements.some(
-    el => el.data && el.data.id === "Q35120"
-  );
+function getLayout(elements) {
   return {
     name: 'breadthfirst',
     fit: true,
@@ -64,7 +60,7 @@ function getLayout(elements, forceEntityRoot) {
     boundingBox: undefined,
     avoidOverlap: true,
     nodeDimensionsIncludeLabels: false,
-    roots: forceEntityRoot && hasEntity ? ["Q35120"] : undefined,
+    roots: undefined,
     depthSort: undefined,
     animate: false,
     animationDuration: 500,
@@ -187,7 +183,7 @@ function App() {
   const [showHighlightSuggestions, setShowHighlightSuggestions] = useState(false);
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
-  const [forceEntityRoot, setForceEntityRoot] = useState(true);
+
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [sampleCount, setSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
@@ -787,6 +783,9 @@ function App() {
       window.removeEventListener('mouseup', onMouseUp);
     };
   }, [isResizing]);
+  
+
+  
   const [sidebarTableData, setSidebarTableData] = useState(null);
 
   // Compute sidebar table data on elements/allItems/rootQids/highlightQids change
@@ -1136,18 +1135,7 @@ function App() {
               />
               <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
             </div>
-            {/* Force entity as root */}
-            <div style={{ marginTop: 16 }}>
-              <label style={{ fontWeight: 'bold', marginRight: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={forceEntityRoot}
-                  onChange={e => setForceEntityRoot(e.target.checked)}
-                  style={{ marginRight: 6 }}
-                />
-                Force "entity" as root
-              </label>
-            </div>
+
             {/* Graph library selection */}
             <div style={{ marginTop: 8 }}>
               <label style={{ fontWeight: 'bold', marginRight: 8 }}>Graph Library:</label>
@@ -1311,15 +1299,19 @@ function App() {
           <CytoscapeComponent
             key={layoutKey}
             elements={elements}
-            layout={getLayout(elements, forceEntityRoot)}
-            stylesheet={getStylesheet(showImages, nodeSize)}
+            layout={React.useMemo(() => getLayout(elements), [elements, layoutKey])}
+            stylesheet={React.useMemo(() => getStylesheet(showImages, nodeSize), [showImages, nodeSize])}
             style={{ width: '100%', height: '100%', background: '#fafafa' }}
             cy={(cy) => {
               cyRef.current = cy;
+              // Apply stylesheet changes without layout recalculation
+              if (cy && elements.length > 0) {
+                cy.style(getStylesheet(showImages, nodeSize));
+              }
             }}
           />
         ) : (
-          <ReactFlowGraph elements={elements} showImages={showImages} forceEntityRoot={forceEntityRoot} />
+          <ReactFlowGraph elements={elements} showImages={showImages} />
         )}
       </div>
     </div>
