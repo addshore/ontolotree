@@ -165,21 +165,29 @@ function App() {
   const [elements, setElements] = useState([]);
   const [layoutKey, setLayoutKey] = useState(0); // force layout refresh
   const [graphType, setGraphType] = useState('cytoscape'); // 'cytoscape' or 'reactflow'
-  const [rootQids, setRootQids] = useState(() => {
-    const stored = localStorage.getItem('ontolotree-rootQids');
+  const [upwardQids, setUpwardQids] = useState(() => {
+    const stored = localStorage.getItem('ontolotree-upwardQids');
     return stored ? stored.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid)) : ['Q144'];
   });
-  const [inputQid, setInputQid] = useState('');
-  const [rootQidLabels, setRootQidLabels] = useState([]);
+  const [downwardQids, setDownwardQids] = useState(() => {
+    const stored = localStorage.getItem('ontolotree-downwardQids');
+    return stored ? stored.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid)) : [];
+  });
+  const [inputUpwardQid, setInputUpwardQid] = useState('');
+  const [inputDownwardQid, setInputDownwardQid] = useState('');
+  const [upwardQidLabels, setUpwardQidLabels] = useState([]);
+  const [downwardQidLabels, setDownwardQidLabels] = useState([]);
   const [highlightQids, setHighlightQids] = useState(() => {
     const stored = localStorage.getItem('ontolotree-highlightQids');
     return stored ? stored.split(',').map(qid => qid.trim()).filter(qid => /^Q\d+$/.test(qid)) : [];
   });
   const [inputHighlightQid, setInputHighlightQid] = useState('');
   const [highlightQidLabels, setHighlightQidLabels] = useState([]);
-  const [searchSuggestions, setSearchSuggestions] = useState([]);
+  const [upwardSearchSuggestions, setUpwardSearchSuggestions] = useState([]);
+  const [downwardSearchSuggestions, setDownwardSearchSuggestions] = useState([]);
   const [highlightSearchSuggestions, setHighlightSearchSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showUpwardSuggestions, setShowUpwardSuggestions] = useState(false);
+  const [showDownwardSuggestions, setShowDownwardSuggestions] = useState(false);
   const [showHighlightSuggestions, setShowHighlightSuggestions] = useState(false);
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
@@ -187,6 +195,8 @@ function App() {
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [sampleCount, setSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
+  const [minNodes, setMinNodes] = useState(() => Number(localStorage.getItem('ontolotree-minNodes')) || 1);
+  const [maxNodes, setMaxNodes] = useState(() => Number(localStorage.getItem('ontolotree-maxNodes')) || 50);
   // Applied values for graph
   const [appliedSampleRate, setAppliedSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
   const [appliedSampleCount, setAppliedSampleCount] = useState(() => Number(localStorage.getItem('ontolotree-sampleCount')) || 10);
@@ -198,8 +208,12 @@ function App() {
 
   // Save settings to localStorage
   useEffect(() => {
-    localStorage.setItem('ontolotree-rootQids', rootQids);
-  }, [rootQids]);
+    localStorage.setItem('ontolotree-upwardQids', upwardQids.join(','));
+  }, [upwardQids]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-downwardQids', downwardQids.join(','));
+  }, [downwardQids]);
 
   useEffect(() => {
     localStorage.setItem('ontolotree-highlightQids', highlightQids.join(','));
@@ -212,6 +226,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ontolotree-sampleCount', sampleCount.toString());
   }, [sampleCount]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-minNodes', minNodes.toString());
+  }, [minNodes]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-maxNodes', maxNodes.toString());
+  }, [maxNodes]);
 
   useEffect(() => {
     localStorage.setItem('ontolotree-showImages', showImages.toString());
@@ -236,50 +258,55 @@ function App() {
   
   // Manual draw function
   const drawGraph = async () => {
-      // Use rootQids array directly
-      const rootQidList = rootQids;
+      // Use upward/downward QIDs
+      const rootQidList = [...upwardQids, ...downwardQids];
       const highlightQidList = highlightQids;
-      if (rootQidList.length === 0) return;
+      if (upwardQids.length === 0 && downwardQids.length === 0) return;
       
       // 1. Get all descendants (P279/P31) and all ancestors (reverse P279) for all root QIDs
       const qids = new Set();
       
-      for (const rootQid of rootQidList) {
-        const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
-        const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
-        
-        // Fetch descendants
-        const resDesc = await fetch('https://query.wikidata.org/sparql', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/sparql-results+json',
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({ query: descendantQuery }),
-          cache: 'force-cache',
-        });
-        const dataDesc = await resDesc.json();
-        
-        // Fetch ancestors
-        const resAnc = await fetch('https://query.wikidata.org/sparql', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/sparql-results+json',
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({ query: ancestorQuery }),
-          cache: 'force-cache',
-        });
-        const dataAnc = await resAnc.json();
-        
-        // Collect QIDs from this root
-        dataDesc.results.bindings.forEach(row => {
-          if (row.i?.value) qids.add(getQidFromUri(row.i.value));
-        });
-        dataAnc.results.bindings.forEach(row => {
-          if (row.i?.value) qids.add(getQidFromUri(row.i.value));
-        });
-        qids.add(rootQid);
+      // Fetch upward trees (ancestors) only if upwardQids exist
+      if (upwardQids.length > 0) {
+        for (const rootQid of upwardQids) {
+          const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
+          
+          const resDesc = await fetch('https://query.wikidata.org/sparql', {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/sparql-results+json',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({ query: descendantQuery }),
+            cache: 'force-cache',
+          });
+          const dataDesc = await resDesc.json();
+          dataDesc.results.bindings.forEach(row => {
+            if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+          });
+          qids.add(rootQid);
+        }
+      }
+      
+      // Fetch downward trees (descendants) only if downwardQids exist
+      if (downwardQids.length > 0) {
+        for (const rootQid of downwardQids) {
+          const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
+          const resAnc = await fetch('https://query.wikidata.org/sparql', {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/sparql-results+json',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({ query: ancestorQuery }),
+            cache: 'force-cache',
+          });
+          const dataAnc = await resAnc.json();
+          dataAnc.results.bindings.forEach(row => {
+            if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+          });
+          qids.add(rootQid);
+        }
       }
       // Always add highlight QIDs (so they're always shown)
       for (const qid of highlightQidList) {
@@ -331,7 +358,7 @@ function App() {
         const label = getLabelFromItemJson(itemJson) || qid;
         const img = getImageFilenameFromItemJson(itemJson);
         let nodeType = undefined;
-        if (rootQidList.includes(qid)) {
+        if (upwardQids.includes(qid) || downwardQids.includes(qid)) {
           nodeType = 'root';
         } else if (highlightQidList.includes(qid)) {
           nodeType = 'highlight';
@@ -413,9 +440,10 @@ function App() {
         const level = Number(levelStr);
         if (qidArr.length > appliedSampleCount) {
           sampledLevels.add(level);
-          // Shuffle and sample
+          // Shuffle and sample with min/max constraints
           const shuffled = [...qidArr].sort(() => Math.random() - 0.5);
-          const keepCount = Math.ceil((appliedSampleRate / 100) * qidArr.length);
+          let keepCount = Math.ceil((appliedSampleRate / 100) * qidArr.length);
+          keepCount = Math.max(minNodes, Math.min(maxNodes, keepCount));
           const keepSet = new Set(shuffled.slice(0, keepCount));
           for (const qid of qidArr) {
             if (keepSet.has(qid)) {
@@ -514,39 +542,21 @@ function App() {
           }
         }
       }
-      // Remove nodes not in mustKeep
+      // Keep all sampled nodes plus connectivity nodes
+      console.log('mustKeep size:', mustKeep.size);
+      console.log('sampledQids size:', sampledQids.size);
+      
+      // Only remove nodes if they're not sampled and not in mustKeep
       for (const qid of Object.keys(nodes)) {
-        if (!mustKeep.has(qid)) {
+        if (!sampledQids.has(qid) && !mustKeep.has(qid) && !rootQidList.includes(qid) && !highlightQidList.includes(qid)) {
           delete nodes[qid];
         }
       }
 
-      // --- Remove disconnected islands: only keep nodes reachable from roots or highlight nodes ---
-      const reachable = new Set();
-      const stack = [...rootQidList, ...highlightQidList].filter(qid => nodes[qid]);
-      while (stack.length > 0) {
-        const qid = stack.pop();
-        if (reachable.has(qid)) continue;
-        reachable.add(qid);
-        // Traverse children (downwards)
-        for (const child of childrenMap[qid] || []) {
-          if (nodes[child] && !reachable.has(child)) {
-            stack.push(child);
-          }
-        }
-        // Traverse parents (upwards)
-        for (const parent of parentMap[qid] || []) {
-          if (nodes[parent] && !reachable.has(parent)) {
-            stack.push(parent);
-          }
-        }
-      }
-      // Remove any nodes not in reachable set
-      for (const qid of Object.keys(nodes)) {
-        if (!reachable.has(qid)) {
-          delete nodes[qid];
-        }
-      }
+      // --- Keep all nodes that were fetched from queries ---
+      // Skip the disconnected islands removal for now to show all fetched nodes
+      console.log('Total nodes after sampling:', Object.keys(nodes).length);
+      console.log('Sample of node QIDs:', Object.keys(nodes).slice(0, 10));
 
       // Update labels with counts after removal
       const shownCount = Object.keys(nodes).length;
@@ -646,7 +656,7 @@ function App() {
   
   // Auto-draw on mount if URL parameter is set
   useEffect(() => {
-    if (shouldAutoDraw && rootQids.length > 0) {
+    if (shouldAutoDraw && (upwardQids.length > 0 || downwardQids.length > 0)) {
       drawGraph();
     }
   }, []);
@@ -666,49 +676,64 @@ function App() {
     }
   };
 
-  const handleSearchInput = async (value, isHighlight = false) => {
-    if (isHighlight) {
+  const handleSearchInput = async (value, type = 'upward') => {
+    if (type === 'highlight') {
       setInputHighlightQid(value);
-    } else {
-      setInputQid(value);
+    } else if (type === 'upward') {
+      setInputUpwardQid(value);
+    } else if (type === 'downward') {
+      setInputDownwardQid(value);
     }
     
     if (value.length >= 2) {
       const suggestions = await searchWikidata(value);
-      if (isHighlight) {
+      if (type === 'highlight') {
         setHighlightSearchSuggestions(suggestions);
         setShowHighlightSuggestions(true);
-      } else {
-        setSearchSuggestions(suggestions);
-        setShowSuggestions(true);
+      } else if (type === 'upward') {
+        setUpwardSearchSuggestions(suggestions);
+        setShowUpwardSuggestions(true);
+      } else if (type === 'downward') {
+        setDownwardSearchSuggestions(suggestions);
+        setShowDownwardSuggestions(true);
       }
     } else {
-      if (isHighlight) {
+      if (type === 'highlight') {
         setHighlightSearchSuggestions([]);
         setShowHighlightSuggestions(false);
-      } else {
-        setSearchSuggestions([]);
-        setShowSuggestions(false);
+      } else if (type === 'upward') {
+        setUpwardSearchSuggestions([]);
+        setShowUpwardSuggestions(false);
+      } else if (type === 'downward') {
+        setDownwardSearchSuggestions([]);
+        setShowDownwardSuggestions(false);
       }
     }
   };
 
-  const selectSuggestion = (suggestion, isHighlight = false) => {
+  const selectSuggestion = (suggestion, type = 'upward') => {
     const qid = suggestion.id;
-    if (isHighlight) {
+    if (type === 'highlight') {
       if (/^Q\d+$/.test(qid) && !highlightQids.includes(qid)) {
         setHighlightQids(prev => [...prev, qid]);
       }
       setInputHighlightQid('');
       setHighlightSearchSuggestions([]);
       setShowHighlightSuggestions(false);
-    } else {
-      if (/^Q\d+$/.test(qid) && !rootQids.includes(qid)) {
-        setRootQids(prev => [...prev, qid]);
+    } else if (type === 'upward') {
+      if (/^Q\d+$/.test(qid) && !upwardQids.includes(qid)) {
+        setUpwardQids(prev => [...prev, qid]);
       }
-      setInputQid('');
-      setSearchSuggestions([]);
-      setShowSuggestions(false);
+      setInputUpwardQid('');
+      setUpwardSearchSuggestions([]);
+      setShowUpwardSuggestions(false);
+    } else if (type === 'downward') {
+      if (/^Q\d+$/.test(qid) && !downwardQids.includes(qid)) {
+        setDownwardQids(prev => [...prev, qid]);
+      }
+      setInputDownwardQid('');
+      setDownwardSearchSuggestions([]);
+      setShowDownwardSuggestions(false);
     }
   };
 
@@ -717,12 +742,12 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(340);
   const [isResizing, setIsResizing] = useState(false);
 
-  // Fetch labels for rootQids
+  // Fetch labels for upwardQids
   useEffect(() => {
     let cancelled = false;
     async function fetchLabels() {
       const labels = await Promise.all(
-        rootQids.map(async qid => {
+        upwardQids.map(async qid => {
           try {
             const json = await fetchWikidataItemJsonMemo(qid);
             return { qid, label: getLabelFromItemJson(json) || qid };
@@ -731,11 +756,31 @@ function App() {
           }
         })
       );
-      if (!cancelled) setRootQidLabels(labels);
+      if (!cancelled) setUpwardQidLabels(labels);
     }
     fetchLabels();
     return () => { cancelled = true; };
-  }, [rootQids]);
+  }, [upwardQids]);
+
+  // Fetch labels for downwardQids
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLabels() {
+      const labels = await Promise.all(
+        downwardQids.map(async qid => {
+          try {
+            const json = await fetchWikidataItemJsonMemo(qid);
+            return { qid, label: getLabelFromItemJson(json) || qid };
+          } catch {
+            return { qid, label: qid };
+          }
+        })
+      );
+      if (!cancelled) setDownwardQidLabels(labels);
+    }
+    fetchLabels();
+    return () => { cancelled = true; };
+  }, [downwardQids]);
 
   // Fetch labels for highlightQids
   useEffect(() => {
@@ -788,9 +833,9 @@ function App() {
   
   const [sidebarTableData, setSidebarTableData] = useState(null);
 
-  // Compute sidebar table data on elements/allItems/rootQids/highlightQids change
+  // Compute sidebar table data on elements/allItems/upwardQids/downwardQids/highlightQids change
   useEffect(() => {
-    const rootQidList = rootQids;
+    const rootQidList = [...upwardQids, ...downwardQids];
     const highlightQidList = highlightQids;
     const shownItems = allItems.filter(item =>
       elements.some(el => el.data && el.data.id === item.qid)
@@ -817,11 +862,11 @@ function App() {
       !elements.some(el => el.data && el.data.id === item.qid)
     ).map(item => ({ ...item, reason: 'hidden (sampled)' }));
     setSidebarTableData({
-      nodeLabel: `All Items (${rootQids.join(', ')})`,
+      nodeLabel: `All Items (${[...upwardQids, ...downwardQids].join(', ')})`,
       shownItems,
       hiddenItems
     });
-  }, [elements, allItems, rootQids, highlightQids]);
+  }, [elements, allItems, upwardQids, downwardQids, highlightQids]);
 
   return (
     <div
@@ -857,37 +902,35 @@ function App() {
           aria-label="Close"
         />
         <div className="sidebar-content">
-          {/* Inputs */}
           <section className="sidebar-section">
-            <h3>Inputs</h3>
-            <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>IDs:</label>
+            <label htmlFor="upward-qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>Upward tree from:</label>
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <input
-                id="qid-input"
+                id="upward-qid-input"
                 type="text"
-                value={inputQid}
-                onChange={e => handleSearchInput(e.target.value, false)}
+                value={inputUpwardQid}
+                onChange={e => handleSearchInput(e.target.value, 'upward')}
                 onKeyDown={async e => {
                   if (e.key === 'Enter') {
-                    const entries = inputQid.split(',').map(q => q.trim()).filter(Boolean);
+                    const entries = inputUpwardQid.split(',').map(q => q.trim()).filter(Boolean);
                     let added = false;
                     for (const qid of entries) {
-                      if (/^Q\d+$/.test(qid) && !rootQids.includes(qid)) {
-                        setRootQids(prev => [...prev, qid]);
+                      if (/^Q\d+$/.test(qid) && !upwardQids.includes(qid)) {
+                        setUpwardQids(prev => [...prev, qid]);
                         added = true;
                       }
                     }
-                    if (added) setInputQid('');
-                    setShowSuggestions(false);
+                    if (added) setInputUpwardQid('');
+                    setShowUpwardSuggestions(false);
                   } else if (e.key === 'Escape') {
-                    setShowSuggestions(false);
+                    setShowUpwardSuggestions(false);
                   }
                 }}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                onBlur={() => setTimeout(() => setShowUpwardSuggestions(false), 200)}
                 style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%' }}
                 placeholder="Search or enter Q144,Q5"
               />
-              {showSuggestions && searchSuggestions.length > 0 && (
+              {showUpwardSuggestions && upwardSearchSuggestions.length > 0 && (
                 <div style={{
                   position: 'absolute',
                   top: '100%',
@@ -902,10 +945,10 @@ function App() {
                   zIndex: 1000,
                   boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                 }}>
-                  {searchSuggestions.map(suggestion => (
+                  {upwardSearchSuggestions.map(suggestion => (
                     <div
                       key={suggestion.id}
-                      onClick={() => selectSuggestion(suggestion, false)}
+                      onClick={() => selectSuggestion(suggestion, 'upward')}
                       style={{
                         padding: '8px 12px',
                         cursor: 'pointer',
@@ -926,8 +969,8 @@ function App() {
               )}
             </div>
             <div className="qid-chip-list">
-              {rootQids.map(qid => {
-                const labelObj = rootQidLabels.find(l => l.qid === qid);
+              {upwardQids.map(qid => {
+                const labelObj = upwardQidLabels.find(l => l.qid === qid);
                 return (
                   <span className="qid-chip" key={qid}>
                     <span className="qid-chip-id">{qid}</span>
@@ -936,7 +979,90 @@ function App() {
                     )}
                     <button
                       className="qid-chip-remove"
-                      onClick={() => setRootQids(rootQids.filter(id => id !== qid))}
+                      onClick={() => setUpwardQids(upwardQids.filter(id => id !== qid))}
+                      aria-label={`Remove ${qid}`}
+                    >×</button>
+                  </span>
+                );
+              })}
+            </div>
+            <label htmlFor="downward-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8 }}>Downward tree from:</label>
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input
+                id="downward-qid-input"
+                type="text"
+                value={inputDownwardQid}
+                onChange={e => handleSearchInput(e.target.value, 'downward')}
+                onKeyDown={async e => {
+                  if (e.key === 'Enter') {
+                    const entries = inputDownwardQid.split(',').map(q => q.trim()).filter(Boolean);
+                    let added = false;
+                    for (const qid of entries) {
+                      if (/^Q\d+$/.test(qid) && !downwardQids.includes(qid)) {
+                        setDownwardQids(prev => [...prev, qid]);
+                        added = true;
+                      }
+                    }
+                    if (added) setInputDownwardQid('');
+                    setShowDownwardSuggestions(false);
+                  } else if (e.key === 'Escape') {
+                    setShowDownwardSuggestions(false);
+                  }
+                }}
+                onBlur={() => setTimeout(() => setShowDownwardSuggestions(false), 200)}
+                style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%' }}
+                placeholder="Search or enter Q5,Q35120"
+              />
+              {showDownwardSuggestions && downwardSearchSuggestions.length > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: '1px solid #bbb',
+                  borderTop: 'none',
+                  borderRadius: '0 0 4px 4px',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  zIndex: 1000,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                }}>
+                  {downwardSearchSuggestions.map(suggestion => (
+                    <div
+                      key={suggestion.id}
+                      onClick={() => selectSuggestion(suggestion, 'downward')}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #eee',
+                        fontSize: 14
+                      }}
+                      onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+                      onMouseLeave={e => e.target.style.background = '#fff'}
+                    >
+                      <div style={{ fontWeight: 'bold', color: '#0074D9' }}>{suggestion.id}</div>
+                      <div style={{ color: '#333' }}>{suggestion.label}</div>
+                      {suggestion.description && (
+                        <div style={{ color: '#666', fontSize: 12 }}>{suggestion.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="qid-chip-list">
+              {downwardQids.map(qid => {
+                const labelObj = downwardQidLabels.find(l => l.qid === qid);
+                return (
+                  <span className="qid-chip" key={qid}>
+                    <span className="qid-chip-id">{qid}</span>
+                    {labelObj && labelObj.label && (
+                      <span className="qid-chip-label">{labelObj.label}</span>
+                    )}
+                    <button
+                      className="qid-chip-remove"
+                      onClick={() => setDownwardQids(downwardQids.filter(id => id !== qid))}
                       aria-label={`Remove ${qid}`}
                     >×</button>
                   </span>
@@ -949,7 +1075,7 @@ function App() {
                 id="highlight-qid-input"
                 type="text"
                 value={inputHighlightQid}
-                onChange={e => handleSearchInput(e.target.value, true)}
+                onChange={e => handleSearchInput(e.target.value, 'highlight')}
                 onKeyDown={async e => {
                   if (e.key === 'Enter') {
                     const entries = inputHighlightQid.split(',').map(q => q.trim()).filter(Boolean);
@@ -988,7 +1114,7 @@ function App() {
                   {highlightSearchSuggestions.map(suggestion => (
                     <div
                       key={suggestion.id}
-                      onClick={() => selectSuggestion(suggestion, true)}
+                      onClick={() => selectSuggestion(suggestion, 'highlight')}
                       style={{
                         padding: '8px 12px',
                         cursor: 'pointer',
@@ -1076,6 +1202,25 @@ function App() {
               onChange={e => setSampleCount(Math.max(1, Number(e.target.value)))}
               style={{ width: 60, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
             />
+            <br />
+            <label htmlFor="min-nodes" style={{ fontWeight: 'bold', marginRight: 4 }}>Min:</label>
+            <input
+              id="min-nodes"
+              type="number"
+              min={1}
+              value={minNodes}
+              onChange={e => setMinNodes(Math.max(1, Number(e.target.value)))}
+              style={{ width: 50, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
+            />
+            <label htmlFor="max-nodes" style={{ fontWeight: 'bold', marginRight: 4 }}>Max:</label>
+            <input
+              id="max-nodes"
+              type="number"
+              min={1}
+              value={maxNodes}
+              onChange={e => setMaxNodes(Math.max(1, Number(e.target.value)))}
+              style={{ width: 50, padding: '2px 6px', borderRadius: 4, border: '1px solid #bbb', fontSize: 15, marginRight: 8 }}
+            />
             <button
               style={{
                 marginLeft: 0,
@@ -1084,23 +1229,13 @@ function App() {
                 fontSize: 15,
                 borderRadius: 4,
                 border: '1px solid #888',
-                background: (
-                  sampleRate !== appliedSampleRate ||
-                  sampleCount !== appliedSampleCount ||
-                  rootQids.join(',') !== (localStorage.getItem('ontolotree-rootQids') || 'Q144') ||
-                  highlightQids.join(',') !== (localStorage.getItem('ontolotree-highlightQids') || '')
-                ) ? '#0074D9' : '#ccc',
+                background: '#0074D9',
                 color: '#fff',
                 fontWeight: 600,
-                cursor: (
-                  sampleRate !== appliedSampleRate ||
-                  sampleCount !== appliedSampleCount ||
-                  rootQids.join(',') !== (localStorage.getItem('ontolotree-rootQids') || 'Q144') ||
-                  highlightQids.join(',') !== (localStorage.getItem('ontolotree-highlightQids') || '')
-                ) ? 'pointer' : 'not-allowed',
+                cursor: 'pointer',
                 transition: 'background 0.2s'
               }}
-              disabled={loadingProgress.isLoading}
+              disabled={loadingProgress.isLoading || (upwardQids.length === 0 && downwardQids.length === 0)}
               onClick={() => {
                 setAppliedSampleRate(sampleRate);
                 setAppliedSampleCount(sampleCount);
