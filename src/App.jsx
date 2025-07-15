@@ -965,6 +965,7 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(340);
   const [isResizing, setIsResizing] = useState(false);
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, nodeId: null });
 
   // Fetch labels for upwardQids
   useEffect(() => {
@@ -1102,7 +1103,7 @@ function App() {
         flexDirection: 'row',
         userSelect: isResizing ? 'none' : undefined
       }}
-      // Remove onMouseMove and onMouseUp from here
+      onClick={() => setContextMenu(prev => ({ ...prev, visible: false }))}
     >
       <Button icon="pi pi-bars" className="menu-toggle-btn" onClick={() => setSidebarVisible(true)} />
       <Sidebar
@@ -1747,6 +1748,103 @@ function App() {
           }}
         />
       </Sidebar>
+      {/* Context Menu */}
+      {contextMenu.visible && (
+        <div
+          style={{
+            position: 'absolute',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            background: '#fff',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            zIndex: 1000,
+            minWidth: 200
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div
+            style={{
+              padding: '8px 12px',
+              cursor: 'pointer',
+              borderBottom: '1px solid #eee',
+              fontSize: 14
+            }}
+            onClick={() => {
+              window.open(`https://www.wikidata.org/wiki/${contextMenu.nodeId}`, '_blank');
+              setContextMenu(prev => ({ ...prev, visible: false }));
+            }}
+            onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+            onMouseLeave={e => e.target.style.background = '#fff'}
+          >
+            Open in Wikidata
+          </div>
+          <div
+            style={{
+              padding: '8px 12px',
+              cursor: 'pointer',
+              borderBottom: '1px solid #eee',
+              fontSize: 14
+            }}
+            onClick={() => {
+              const qid = contextMenu.nodeId;
+              if (upwardQids.includes(qid)) {
+                setUpwardQids(prev => prev.filter(id => id !== qid));
+              } else {
+                setUpwardQids(prev => [...prev, qid]);
+              }
+              setContextMenu(prev => ({ ...prev, visible: false }));
+            }}
+            onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+            onMouseLeave={e => e.target.style.background = '#fff'}
+          >
+            {upwardQids.includes(contextMenu.nodeId) ? 'Remove from' : 'Add to'} Upward Tree
+          </div>
+          <div
+            style={{
+              padding: '8px 12px',
+              cursor: 'pointer',
+              borderBottom: '1px solid #eee',
+              fontSize: 14
+            }}
+            onClick={() => {
+              const qid = contextMenu.nodeId;
+              if (downwardQids.includes(qid)) {
+                setDownwardQids(prev => prev.filter(id => id !== qid));
+              } else {
+                setDownwardQids(prev => [...prev, qid]);
+              }
+              setContextMenu(prev => ({ ...prev, visible: false }));
+            }}
+            onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+            onMouseLeave={e => e.target.style.background = '#fff'}
+          >
+            {downwardQids.includes(contextMenu.nodeId) ? 'Remove from' : 'Add to'} Downward Tree
+          </div>
+          <div
+            style={{
+              padding: '8px 12px',
+              cursor: 'pointer',
+              fontSize: 14
+            }}
+            onClick={() => {
+              const qid = contextMenu.nodeId;
+              if (highlightQids.includes(qid)) {
+                setHighlightQids(prev => prev.filter(id => id !== qid));
+              } else {
+                setHighlightQids(prev => [...prev, qid]);
+              }
+              setContextMenu(prev => ({ ...prev, visible: false }));
+            }}
+            onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+            onMouseLeave={e => e.target.style.background = '#fff'}
+          >
+            {highlightQids.includes(contextMenu.nodeId) ? 'Remove from' : 'Add to'} Highlight IDs
+          </div>
+        </div>
+      )}
+      
       {/* Main graph area */}
       <div className="main-content">
         {graphType === 'cytoscape' ? (
@@ -1762,6 +1860,27 @@ function App() {
               if (cy && elements.length > 0) {
                 cy.style(getStylesheet(showImages, nodeSize));
               }
+              
+              // Add right-click context menu for nodes
+              cy.on('cxttap', 'node', (evt) => {
+                const node = evt.target;
+                const nodeId = node.id();
+                const renderedPosition = evt.renderedPosition || evt.position;
+                
+                setContextMenu({
+                  visible: true,
+                  x: renderedPosition.x,
+                  y: renderedPosition.y,
+                  nodeId: nodeId
+                });
+                
+                evt.stopPropagation();
+              });
+              
+              // Hide context menu on click elsewhere
+              cy.on('tap', () => {
+                setContextMenu(prev => ({ ...prev, visible: false }));
+              });
             }}
           />
         ) : (
