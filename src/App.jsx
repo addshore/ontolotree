@@ -553,10 +553,34 @@ function App() {
         }
       }
 
-      // --- Keep all nodes that were fetched from queries ---
-      // Skip the disconnected islands removal for now to show all fetched nodes
-      console.log('Total nodes after sampling:', Object.keys(nodes).length);
-      console.log('Sample of node QIDs:', Object.keys(nodes).slice(0, 10));
+      // --- Remove disconnected islands: only keep nodes reachable from roots or highlight nodes ---
+      const reachable = new Set();
+      const stack = [...rootQidList, ...highlightQidList].filter(qid => nodes[qid]);
+      while (stack.length > 0) {
+        const qid = stack.pop();
+        if (reachable.has(qid)) continue;
+        reachable.add(qid);
+        // Traverse children (downwards)
+        for (const child of childrenMap[qid] || []) {
+          if (nodes[child] && !reachable.has(child)) {
+            stack.push(child);
+          }
+        }
+        // Traverse parents (upwards)
+        for (const parent of parentMap[qid] || []) {
+          if (nodes[parent] && !reachable.has(parent)) {
+            stack.push(parent);
+          }
+        }
+      }
+      // Remove any nodes not in reachable set
+      for (const qid of Object.keys(nodes)) {
+        if (!reachable.has(qid)) {
+          delete nodes[qid];
+        }
+      }
+      
+      console.log('Total nodes after connectivity filtering:', Object.keys(nodes).length);
 
       // Update labels with counts after removal
       const shownCount = Object.keys(nodes).length;
@@ -574,14 +598,17 @@ function App() {
       const edgeSet = new Set();
       let edges = [];
       const propertyIds = new Set();
-      for (const qid of qids) {
-        if (!nodes[qid]) continue;
+      
+      // Create edges for all remaining nodes, checking against the original qids set
+      for (const qid of Object.keys(nodes)) {
         const itemJson = qidToItemJson[qid];
+        if (!itemJson) continue;
+        
         // P279 edges
         const p279s = itemJson?.statements?.P279 || [];
         for (const claim of p279s) {
           const parentQid = claim.value?.content;
-          if (parentQid && qids.has(parentQid) && nodes[parentQid] && nodes[qid]) {
+          if (parentQid && nodes[parentQid]) {
             const pid = 'P279';
             propertyIds.add(pid);
             const edgeKey = `${parentQid}->${qid}->${pid}`;
@@ -595,7 +622,7 @@ function App() {
         const p31s = itemJson?.statements?.P31 || [];
         for (const claim of p31s) {
           const parentQid = claim.value?.content;
-          if (parentQid && qids.has(parentQid) && nodes[parentQid] && nodes[qid]) {
+          if (parentQid && nodes[parentQid]) {
             const pid = 'P31';
             propertyIds.add(pid);
             const edgeKey = `${parentQid}->${qid}->${pid}`;
@@ -850,10 +877,7 @@ function App() {
         if (element && element.data.sampledLevel) {
           reason = 'shown (sampled level)';
         } else {
-          const isOnHighlightPath = highlightQidList.some(() => true);
-          if (isOnHighlightPath && reason === 'shown') {
-            reason = 'shown (highlight connection)';
-          }
+          reason = 'shown (connectivity)';
         }
       }
       return { ...item, reason };
