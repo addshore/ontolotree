@@ -181,6 +181,10 @@ function App() {
   });
   const [inputHighlightQid, setInputHighlightQid] = useState('');
   const [highlightQidLabels, setHighlightQidLabels] = useState([]);
+  const [searchSuggestions, setSearchSuggestions] = useState([]);
+  const [highlightSearchSuggestions, setHighlightSearchSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showHighlightSuggestions, setShowHighlightSuggestions] = useState(false);
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
   const [forceEntityRoot, setForceEntityRoot] = useState(true);
@@ -601,7 +605,66 @@ function App() {
     fetchData();
   }, [rootQids, appliedSampleRate, appliedSampleCount]);
 
-  // Handler for input box
+  // Search functionality
+  const searchWikidata = async (query) => {
+    if (!query || query.length < 2) return [];
+    try {
+      const response = await fetch(
+        `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&origin=*&limit=10`
+      );
+      const data = await response.json();
+      return data.search || [];
+    } catch (error) {
+      console.error('Search failed:', error);
+      return [];
+    }
+  };
+
+  const handleSearchInput = async (value, isHighlight = false) => {
+    if (isHighlight) {
+      setInputHighlightQid(value);
+    } else {
+      setInputQid(value);
+    }
+    
+    if (value.length >= 2) {
+      const suggestions = await searchWikidata(value);
+      if (isHighlight) {
+        setHighlightSearchSuggestions(suggestions);
+        setShowHighlightSuggestions(true);
+      } else {
+        setSearchSuggestions(suggestions);
+        setShowSuggestions(true);
+      }
+    } else {
+      if (isHighlight) {
+        setHighlightSearchSuggestions([]);
+        setShowHighlightSuggestions(false);
+      } else {
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }
+  };
+
+  const selectSuggestion = (suggestion, isHighlight = false) => {
+    const qid = suggestion.id;
+    if (isHighlight) {
+      if (/^Q\d+$/.test(qid) && !highlightQids.includes(qid)) {
+        setHighlightQids(prev => [...prev, qid]);
+      }
+      setInputHighlightQid('');
+      setHighlightSearchSuggestions([]);
+      setShowHighlightSuggestions(false);
+    } else {
+      if (/^Q\d+$/.test(qid) && !rootQids.includes(qid)) {
+        setRootQids(prev => [...prev, qid]);
+      }
+      setInputQid('');
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
 
   // Sidebar collapse state
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -749,27 +812,70 @@ function App() {
           <section className="sidebar-section">
             <h3>Inputs</h3>
             <label htmlFor="qid-input" style={{ fontWeight: 'bold', marginRight: 8 }}>IDs:</label>
-            <input
-              id="qid-input"
-              type="text"
-              value={inputQid}
-              onChange={e => setInputQid(e.target.value)}
-              onKeyDown={async e => {
-                if (e.key === 'Enter') {
-                  const entries = inputQid.split(',').map(q => q.trim()).filter(Boolean);
-                  let added = false;
-                  for (const qid of entries) {
-                    if (/^Q\d+$/.test(qid) && !rootQids.includes(qid)) {
-                      setRootQids(prev => [...prev, qid]);
-                      added = true;
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input
+                id="qid-input"
+                type="text"
+                value={inputQid}
+                onChange={e => handleSearchInput(e.target.value, false)}
+                onKeyDown={async e => {
+                  if (e.key === 'Enter') {
+                    const entries = inputQid.split(',').map(q => q.trim()).filter(Boolean);
+                    let added = false;
+                    for (const qid of entries) {
+                      if (/^Q\d+$/.test(qid) && !rootQids.includes(qid)) {
+                        setRootQids(prev => [...prev, qid]);
+                        added = true;
+                      }
                     }
+                    if (added) setInputQid('');
+                    setShowSuggestions(false);
+                  } else if (e.key === 'Escape') {
+                    setShowSuggestions(false);
                   }
-                  if (added) setInputQid('');
-                }
-              }}
-              style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', marginBottom: 8 }}
-              placeholder="Q144,Q5"
-            />
+                }}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%' }}
+                placeholder="Search or enter Q144,Q5"
+              />
+              {showSuggestions && searchSuggestions.length > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: '1px solid #bbb',
+                  borderTop: 'none',
+                  borderRadius: '0 0 4px 4px',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  zIndex: 1000,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                }}>
+                  {searchSuggestions.map(suggestion => (
+                    <div
+                      key={suggestion.id}
+                      onClick={() => selectSuggestion(suggestion, false)}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #eee',
+                        fontSize: 14
+                      }}
+                      onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+                      onMouseLeave={e => e.target.style.background = '#fff'}
+                    >
+                      <div style={{ fontWeight: 'bold', color: '#0074D9' }}>{suggestion.id}</div>
+                      <div style={{ color: '#333' }}>{suggestion.label}</div>
+                      {suggestion.description && (
+                        <div style={{ color: '#666', fontSize: 12 }}>{suggestion.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="qid-chip-list">
               {rootQids.map(qid => {
                 const labelObj = rootQidLabels.find(l => l.qid === qid);
@@ -789,27 +895,70 @@ function App() {
               })}
             </div>
             <label htmlFor="highlight-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8, color: 'green' }}>Highlight IDs:</label>
-            <input
-              id="highlight-qid-input"
-              type="text"
-              value={inputHighlightQid}
-              onChange={e => setInputHighlightQid(e.target.value)}
-              onKeyDown={async e => {
-                if (e.key === 'Enter') {
-                  const entries = inputHighlightQid.split(',').map(q => q.trim()).filter(Boolean);
-                  let added = false;
-                  for (const qid of entries) {
-                    if (/^Q\d+$/.test(qid) && !highlightQids.includes(qid)) {
-                      setHighlightQids(prev => [...prev, qid]);
-                      added = true;
+            <div style={{ position: 'relative' }}>
+              <input
+                id="highlight-qid-input"
+                type="text"
+                value={inputHighlightQid}
+                onChange={e => handleSearchInput(e.target.value, true)}
+                onKeyDown={async e => {
+                  if (e.key === 'Enter') {
+                    const entries = inputHighlightQid.split(',').map(q => q.trim()).filter(Boolean);
+                    let added = false;
+                    for (const qid of entries) {
+                      if (/^Q\d+$/.test(qid) && !highlightQids.includes(qid)) {
+                        setHighlightQids(prev => [...prev, qid]);
+                        added = true;
+                      }
                     }
+                    if (added) setInputHighlightQid('');
+                    setShowHighlightSuggestions(false);
+                  } else if (e.key === 'Escape') {
+                    setShowHighlightSuggestions(false);
                   }
-                  if (added) setInputHighlightQid('');
-                }
-              }}
-              style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', background: '#eaffea' }}
-              placeholder="Q42,Q1"
-            />
+                }}
+                onBlur={() => setTimeout(() => setShowHighlightSuggestions(false), 200)}
+                style={{ fontSize: 16, padding: '4px 8px', borderRadius: 4, border: '1px solid #bbb', width: '100%', background: '#eaffea' }}
+                placeholder="Search or enter Q42,Q1"
+              />
+              {showHighlightSuggestions && highlightSearchSuggestions.length > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: '1px solid #bbb',
+                  borderTop: 'none',
+                  borderRadius: '0 0 4px 4px',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  zIndex: 1000,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                }}>
+                  {highlightSearchSuggestions.map(suggestion => (
+                    <div
+                      key={suggestion.id}
+                      onClick={() => selectSuggestion(suggestion, true)}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #eee',
+                        fontSize: 14
+                      }}
+                      onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+                      onMouseLeave={e => e.target.style.background = '#fff'}
+                    >
+                      <div style={{ fontWeight: 'bold', color: '#0074D9' }}>{suggestion.id}</div>
+                      <div style={{ color: '#333' }}>{suggestion.label}</div>
+                      {suggestion.description && (
+                        <div style={{ color: '#666', fontSize: 12 }}>{suggestion.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="qid-chip-list">
               {highlightQids.map(qid => {
                 const labelObj = highlightQidLabels.find(l => l.qid === qid);
