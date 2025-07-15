@@ -91,9 +91,10 @@ export function getLabelFromPropertyJson(propertyJson, lang = 'en') {
 
 // Get P18 image filename from Wikidata REST API item JSON
 export function getImageFilenameFromItemJson(itemJson) {
-  const claims = itemJson.statements?.P18;
+  if (!itemJson || !itemJson.statements) return undefined;
+  const claims = itemJson.statements.P18;
   if (!claims || !Array.isArray(claims) || claims.length === 0) return undefined;
-  return claims[0]?.value.content;
+  return claims[0]?.value?.content;
 }
 
 // Generate SPARQL query for all ancestors (reverse P279 tree)

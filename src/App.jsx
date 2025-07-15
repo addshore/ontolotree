@@ -197,6 +197,7 @@ function App() {
   const [totalNodeCount, setTotalNodeCount] = useState(0);
   const [totalEdgeCount, setTotalEdgeCount] = useState(0);
   const [allItems, setAllItems] = useState([]);
+  const [loadingProgress, setLoadingProgress] = useState({ total: 0, completed: 0, isLoading: false, step: '' });
   const cyRef = useRef(null);
 
   // Save settings to localStorage
@@ -234,9 +235,11 @@ function App() {
     }
   }, []);
 
-  // Redraw graph when rootQids or applied sample settings change
-  useEffect(() => {
-    async function fetchData() {
+  // Check URL for auto-draw parameter
+  const shouldAutoDraw = new URLSearchParams(window.location.search).get('draw') === '1';
+  
+  // Manual draw function
+  const drawGraph = async () => {
       // Use rootQids array directly
       const rootQidList = rootQids;
       const highlightQidList = highlightQids;
@@ -295,12 +298,24 @@ function App() {
         }
       });
       // 3. Fetch all item JSONs in parallel, with concurrency and 429 handling, and memoization
-      const limit = pLimit(4);
+      const limit = pLimit(3);
       const qidToItemJson = {};
-      await Promise.all(Array.from(qids).map(qid =>
+      const qidArray = Array.from(qids);
+      setLoadingProgress({ total: qidArray.length, completed: 0, isLoading: true, step: 'Fetching entities' });
+      
+      let completed = 0;
+      await Promise.all(qidArray.map(qid =>
         limit(() => fetchWithBackoff(() => fetchWikidataItemJsonMemo(qid)))
-          .then(json => { qidToItemJson[qid] = json; })
-          .catch(e => { console.warn('Failed to fetch item JSON for', qid, e); })
+          .then(json => { 
+            qidToItemJson[qid] = json; 
+            completed++;
+            setLoadingProgress(prev => ({ ...prev, completed }));
+          })
+          .catch(e => { 
+            console.warn('Failed to fetch item JSON for', qid, e); 
+            completed++;
+            setLoadingProgress(prev => ({ ...prev, completed }));
+          })
       ));
       // 4. Build nodes and edges using P279 and P31 claims from JSON
       const nodes = {};
@@ -337,6 +352,7 @@ function App() {
       }
 
       // --- Sampling logic by level ---
+      setLoadingProgress(prev => ({ ...prev, step: 'Building graph structure' }));
       // 1. Build adjacency and reverse adjacency for BFS
       const childrenMap = {};
       const parentMap = {};
@@ -419,6 +435,7 @@ function App() {
       }
 
       // --- Connectivity preservation: keep all nodes on paths from root to sampled nodes and highlight QIDs ---
+      setLoadingProgress(prev => ({ ...prev, step: 'Computing connectivity paths' }));
       // BFS from each sampled node up to root, and from root down to sampled nodes
       const mustKeep = new Set();
       // Always keep highlight QIDs
@@ -480,12 +497,22 @@ function App() {
         }
       }
       // Downwards: BFS from all roots, only keep paths that reach sampled nodes or highlight QIDs
+      setLoadingProgress(prev => ({ ...prev, step: 'Processing connectivity', total: 0, completed: 0 }));
       const queue2 = [...rootQidList, ...highlightQidList];
+      const visited2 = new Set();
+      let processedCount = 0;
       while (queue2.length > 0) {
         const qid = queue2.shift();
+        if (visited2.has(qid)) continue;
+        visited2.add(qid);
+        processedCount++;
+        if (processedCount % 100 === 0) {
+          setLoadingProgress(prev => ({ ...prev, step: `Processing connectivity: ${processedCount} nodes`, total: 0, completed: 0 }));
+          await new Promise(resolve => setTimeout(resolve, 1));
+        }
         if (!mustKeep.has(qid)) continue;
         for (const child of childrenMap[qid] || []) {
-          if (sampledQids.has(child) || mustKeep.has(child) || highlightQidList.includes(child)) {
+          if (!visited2.has(child) && (sampledQids.has(child) || mustKeep.has(child) || highlightQidList.includes(child))) {
             mustKeep.add(child);
             queue2.push(child);
           }
@@ -590,20 +617,43 @@ function App() {
       
       // Fetch property labels with concurrency, 429 handling, and memoization
       const pidToLabel = {};
-      await Promise.all(Array.from(propertyIds).map(pid =>
-        limit(() => fetchWithBackoff(() => fetchWikidataPropertyJsonMemo(pid)))
-          .then(propertyJson => { pidToLabel[pid] = getLabelFromPropertyJson(propertyJson) || pid; })
-          .catch(e => { console.warn('Failed to fetch property JSON for', pid, e); pidToLabel[pid] = pid; })
-      ));
+      const propertyArray = Array.from(propertyIds);
+      if (propertyArray.length > 0) {
+        setLoadingProgress(prev => ({ ...prev, total: prev.total + propertyArray.length }));
+        await Promise.all(propertyArray.map(pid =>
+          limit(() => fetchWithBackoff(() => fetchWikidataPropertyJsonMemo(pid)))
+            .then(propertyJson => { 
+              pidToLabel[pid] = getLabelFromPropertyJson(propertyJson) || pid; 
+              completed++;
+              setLoadingProgress(prev => ({ ...prev, completed }));
+            })
+            .catch(e => { 
+              console.warn('Failed to fetch property JSON for', pid, e); 
+              pidToLabel[pid] = pid;
+              completed++;
+              setLoadingProgress(prev => ({ ...prev, completed }));
+            })
+        ));
+      }
       // Add property label to edge data
       edges.forEach(edge => {
         edge.data.propertyLabel = pidToLabel[edge.data.property] || edge.data.property;
       });
-      setElements([...Object.values(nodes), ...edges]);
-      setLayoutKey(prev => prev + 1);
+      
+      // Use setTimeout to prevent UI blocking
+      setTimeout(() => {
+        setElements([...Object.values(nodes), ...edges]);
+        setLayoutKey(prev => prev + 1);
+        setLoadingProgress({ total: 0, completed: 0, isLoading: false, step: '' });
+      }, 10);
+  };
+  
+  // Auto-draw on mount if URL parameter is set
+  useEffect(() => {
+    if (shouldAutoDraw && rootQids.length > 0) {
+      drawGraph();
     }
-    fetchData();
-  }, [rootQids, appliedSampleRate, appliedSampleCount]);
+  }, []);
 
   // Search functionality
   const searchWikidata = async (query) => {
@@ -978,6 +1028,32 @@ function App() {
               })}
             </div>
           </section>
+          {/* Loading Progress */}
+          {loadingProgress.isLoading && (
+            <section className="sidebar-section">
+              <h3>Loading Progress</h3>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 14, marginBottom: 4 }}>
+                  {loadingProgress.step}
+                  {loadingProgress.total > 0 && `: ${loadingProgress.completed} / ${loadingProgress.total}`}
+                </div>
+                <div style={{
+                  width: '100%',
+                  height: 8,
+                  background: '#eee',
+                  borderRadius: 4,
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    width: `${loadingProgress.total > 0 ? (loadingProgress.completed / loadingProgress.total) * 100 : 0}%`,
+                    height: '100%',
+                    background: '#0074D9',
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
+              </div>
+            </section>
+          )}
           {/* Filtering */}
           <section className="sidebar-section">
             <h3>Filtering</h3>
@@ -1025,18 +1101,14 @@ function App() {
                 ) ? 'pointer' : 'not-allowed',
                 transition: 'background 0.2s'
               }}
-              disabled={!(
-                sampleRate !== appliedSampleRate ||
-                sampleCount !== appliedSampleCount ||
-                rootQids.join(',') !== (localStorage.getItem('ontolotree-rootQids') || 'Q144') ||
-                highlightQids.join(',') !== (localStorage.getItem('ontolotree-highlightQids') || '')
-              )}
+              disabled={loadingProgress.isLoading}
               onClick={() => {
                 setAppliedSampleRate(sampleRate);
                 setAppliedSampleCount(sampleCount);
+                drawGraph();
               }}
             >
-              Redraw Graph
+              Draw Graph
             </button>
           </section>
           {/* Display */}
