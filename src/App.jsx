@@ -294,7 +294,7 @@ function App() {
         }
       });
       // 3. Fetch all item JSONs in parallel, with concurrency and 429 handling, and memoization
-      const limit = pLimit(3);
+      const limit = pLimit(5);
       const qidToItemJson = {};
       const qidArray = Array.from(qids);
       setLoadingProgress({ total: qidArray.length, completed: 0, isLoading: true, step: 'Fetching entities' });
