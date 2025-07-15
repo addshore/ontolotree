@@ -14,7 +14,12 @@ import {
   getLabelFromPropertyJson,
   getImageFilenameFromItemJson,
   generateSimpleSuperclassQuery,
-  generateSimpleSubclassOrInstanceQuery
+  generateSimpleSubclassOrInstanceQuery,
+  generateUpwardInstancesQuery,
+  generateUpwardP13359Query,
+  generateUpwardP13359ChainQuery,
+  generateDownwardInstancesQuery,
+  generateDownwardP13359Query
 } from './wikidataService';
 
 // Helper: Extract QID from Wikidata URI
@@ -191,6 +196,17 @@ function App() {
   const [showHighlightSuggestions, setShowHighlightSuggestions] = useState(false);
   const [showImages, setShowImages] = useState(() => localStorage.getItem('ontolotree-showImages') !== 'false');
   const [nodeSize, setNodeSize] = useState(() => Number(localStorage.getItem('ontolotree-nodeSize')) || 100);
+  
+  // Query options for upward direction
+  const [upwardIncludeSubclasses, setUpwardIncludeSubclasses] = useState(() => localStorage.getItem('ontolotree-upwardIncludeSubclasses') !== 'false');
+  const [upwardIncludeInstances, setUpwardIncludeInstances] = useState(() => localStorage.getItem('ontolotree-upwardIncludeInstances') === 'true');
+  const [upwardIncludeP13359, setUpwardIncludeP13359] = useState(() => localStorage.getItem('ontolotree-upwardIncludeP13359') === 'true');
+  const [upwardIncludeP13359Chain, setUpwardIncludeP13359Chain] = useState(() => localStorage.getItem('ontolotree-upwardIncludeP13359Chain') === 'true');
+  
+  // Query options for downward direction
+  const [downwardIncludeSuperclasses, setDownwardIncludeSuperclasses] = useState(() => localStorage.getItem('ontolotree-downwardIncludeSuperclasses') !== 'false');
+  const [downwardIncludeInstances, setDownwardIncludeInstances] = useState(() => localStorage.getItem('ontolotree-downwardIncludeInstances') === 'true');
+  const [downwardIncludeP13359, setDownwardIncludeP13359] = useState(() => localStorage.getItem('ontolotree-downwardIncludeP13359') === 'true');
 
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
@@ -243,6 +259,34 @@ function App() {
     localStorage.setItem('ontolotree-nodeSize', nodeSize.toString());
   }, [nodeSize]);
 
+  useEffect(() => {
+    localStorage.setItem('ontolotree-upwardIncludeSubclasses', upwardIncludeSubclasses.toString());
+  }, [upwardIncludeSubclasses]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-upwardIncludeInstances', upwardIncludeInstances.toString());
+  }, [upwardIncludeInstances]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-upwardIncludeP13359', upwardIncludeP13359.toString());
+  }, [upwardIncludeP13359]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-upwardIncludeP13359Chain', upwardIncludeP13359Chain.toString());
+  }, [upwardIncludeP13359Chain]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-downwardIncludeSuperclasses', downwardIncludeSuperclasses.toString());
+  }, [downwardIncludeSuperclasses]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-downwardIncludeInstances', downwardIncludeInstances.toString());
+  }, [downwardIncludeInstances]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-downwardIncludeP13359', downwardIncludeP13359.toString());
+  }, [downwardIncludeP13359]);
+
   // Trigger initial redraw if applied settings don't match localStorage
   useEffect(() => {
     const storedSampleRate = Number(localStorage.getItem('ontolotree-sampleRate')) || 100;
@@ -269,21 +313,78 @@ function App() {
       // Fetch upward trees (ancestors) only if upwardQids exist
       if (upwardQids.length > 0) {
         for (const rootQid of upwardQids) {
-          const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
+          // Default: subclass descendants
+          if (upwardIncludeSubclasses) {
+            const descendantQuery = generateSimpleSubclassOrInstanceQuery(rootQid);
+            const resDesc = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: descendantQuery }),
+              cache: 'force-cache',
+            });
+            const dataDesc = await resDesc.json();
+            dataDesc.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
           
-          const resDesc = await fetch('https://query.wikidata.org/sparql', {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/sparql-results+json',
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({ query: descendantQuery }),
-            cache: 'force-cache',
-          });
-          const dataDesc = await resDesc.json();
-          dataDesc.results.bindings.forEach(row => {
-            if (row.i?.value) qids.add(getQidFromUri(row.i.value));
-          });
+          // Optional: direct instances (P31)
+          if (upwardIncludeInstances) {
+            const instanceQuery = generateUpwardInstancesQuery(rootQid);
+            const resInst = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: instanceQuery }),
+              cache: 'force-cache',
+            });
+            const dataInst = await resInst.json();
+            dataInst.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
+          
+          // Optional: P13359 connections
+          if (upwardIncludeP13359) {
+            const p13359Query = generateUpwardP13359Query(rootQid);
+            const resP13359 = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: p13359Query }),
+              cache: 'force-cache',
+            });
+            const dataP13359 = await resP13359.json();
+            dataP13359.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
+          
+          // Optional: P13359 chains
+          if (upwardIncludeP13359Chain) {
+            const p13359ChainQuery = generateUpwardP13359ChainQuery(rootQid);
+            const resP13359Chain = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: p13359ChainQuery }),
+              cache: 'force-cache',
+            });
+            const dataP13359Chain = await resP13359Chain.json();
+            dataP13359Chain.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
+          
           qids.add(rootQid);
         }
       }
@@ -291,20 +392,60 @@ function App() {
       // Fetch downward trees (descendants) only if downwardQids exist
       if (downwardQids.length > 0) {
         for (const rootQid of downwardQids) {
-          const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
-          const resAnc = await fetch('https://query.wikidata.org/sparql', {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/sparql-results+json',
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({ query: ancestorQuery }),
-            cache: 'force-cache',
-          });
-          const dataAnc = await resAnc.json();
-          dataAnc.results.bindings.forEach(row => {
-            if (row.i?.value) qids.add(getQidFromUri(row.i.value));
-          });
+          // Default: superclass ancestors
+          if (downwardIncludeSuperclasses) {
+            const ancestorQuery = generateSimpleSuperclassQuery(rootQid);
+            const resAnc = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: ancestorQuery }),
+              cache: 'force-cache',
+            });
+            const dataAnc = await resAnc.json();
+            dataAnc.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
+          
+          // Optional: direct instances
+          if (downwardIncludeInstances) {
+            const instanceQuery = generateDownwardInstancesQuery(rootQid);
+            const resInst = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: instanceQuery }),
+              cache: 'force-cache',
+            });
+            const dataInst = await resInst.json();
+            dataInst.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
+          
+          // Optional: P13359 reverse connections
+          if (downwardIncludeP13359) {
+            const p13359Query = generateDownwardP13359Query(rootQid);
+            const resP13359 = await fetch('https://query.wikidata.org/sparql', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({ query: p13359Query }),
+              cache: 'force-cache',
+            });
+            const dataP13359 = await resP13359.json();
+            dataP13359.results.bindings.forEach(row => {
+              if (row.i?.value) qids.add(getQidFromUri(row.i.value));
+            });
+          }
+          
           qids.add(rootQid);
         }
       }
@@ -1010,6 +1151,44 @@ function App() {
                 );
               })}
             </div>
+            <div style={{ marginTop: 8, marginBottom: 8, fontSize: 13, color: '#666' }}>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={upwardIncludeSubclasses}
+                  onChange={e => setUpwardIncludeSubclasses(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include subclasses (<a href="https://www.wikidata.org/wiki/Property:P279" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P279</a>) - default
+              </label>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={upwardIncludeInstances}
+                  onChange={e => setUpwardIncludeInstances(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include direct instances (<a href="https://www.wikidata.org/wiki/Property:P31" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P31</a>)
+              </label>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={upwardIncludeP13359}
+                  onChange={e => setUpwardIncludeP13359(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include <a href="https://www.wikidata.org/wiki/Property:P13359" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P13359</a> (items classified) connections
+              </label>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={upwardIncludeP13359Chain}
+                  onChange={e => setUpwardIncludeP13359Chain(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include <a href="https://www.wikidata.org/wiki/Property:P13359" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P13359</a> chains with subclass paths
+              </label>
+            </div>
             <label htmlFor="downward-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8 }}>Downward tree from:</label>
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <input
@@ -1092,6 +1271,35 @@ function App() {
                   </span>
                 );
               })}
+            </div>
+            <div style={{ marginTop: 8, marginBottom: 8, fontSize: 13, color: '#666' }}>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={downwardIncludeSuperclasses}
+                  onChange={e => setDownwardIncludeSuperclasses(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include superclasses (<a href="https://www.wikidata.org/wiki/Property:P279" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P279</a>) - default
+              </label>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={downwardIncludeInstances}
+                  onChange={e => setDownwardIncludeInstances(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include direct instances (<a href="https://www.wikidata.org/wiki/Property:P31" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P31</a>)
+              </label>
+              <label style={{ display: 'block', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={downwardIncludeP13359}
+                  onChange={e => setDownwardIncludeP13359(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Include <a href="https://www.wikidata.org/wiki/Property:P13359" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P13359</a> reverse connections
+              </label>
             </div>
             <label htmlFor="highlight-qid-input" style={{ fontWeight: 'bold', marginTop: 8, marginRight: 8, color: 'green' }}>Highlight IDs:</label>
             <div style={{ position: 'relative' }}>

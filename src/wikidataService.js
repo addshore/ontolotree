@@ -106,3 +106,25 @@ export function generateSimpleSuperclassQuery(rootQid) {
 export function generateSimpleSubclassOrInstanceQuery(rootQid) {
   return `SELECT DISTINCT ?i WHERE { wd:${rootQid} (wdt:P279)+ ?i }`;
 }
+
+// Generate upward queries
+export function generateUpwardInstancesQuery(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} wdt:P31 ?i }`;
+}
+
+export function generateUpwardP13359Query(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} wdt:P31 ?i1 . ?i1 wdt:P13359 ?i }`;
+}
+
+export function generateUpwardP13359ChainQuery(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { wd:${rootQid} wdt:P31 ?i1 . ?i1 wdt:P13359 ?i2 . ?i2 (wdt:P31/wdt:P279|wdt:P279)+ ?i }`;
+}
+
+// Generate downward queries
+export function generateDownwardInstancesQuery(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { ?i wdt:P31 wd:${rootQid} }`;
+}
+
+export function generateDownwardP13359Query(rootQid) {
+  return `SELECT DISTINCT ?i WHERE { ?i (wdt:P31/wdt:P279* | wdt:P279/wdt:P279*) ?x . ?x wdt:P13359 wd:${rootQid} }`;
+}
