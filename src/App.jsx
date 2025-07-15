@@ -161,6 +161,7 @@ const getStylesheet = (showImages, nodeSize) => [
     style: {
       'line-color': '#7ecbff',
       'target-arrow-color': '#7ecbff',
+      'curve-style': 'straight',
     }
   },
   {
@@ -168,6 +169,8 @@ const getStylesheet = (showImages, nodeSize) => [
     style: {
       'line-color': '#ff7f7f',
       'target-arrow-color': '#ff7f7f',
+      'curve-style': 'bezier',
+      'control-point-step-size': 40,
     }
   },
   {
@@ -175,6 +178,8 @@ const getStylesheet = (showImages, nodeSize) => [
     style: {
       'line-color': '#7fff7f',
       'target-arrow-color': '#7fff7f',
+      'curve-style': 'bezier',
+      'control-point-step-size': -40,
     }
   },
 ];
