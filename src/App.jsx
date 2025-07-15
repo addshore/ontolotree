@@ -163,6 +163,20 @@ const getStylesheet = (showImages, nodeSize) => [
       'target-arrow-color': '#7ecbff',
     }
   },
+  {
+    selector: 'edge[property = "P31"]',
+    style: {
+      'line-color': '#ff7f7f',
+      'target-arrow-color': '#ff7f7f',
+    }
+  },
+  {
+    selector: 'edge[property = "P13359"]',
+    style: {
+      'line-color': '#7fff7f',
+      'target-arrow-color': '#7fff7f',
+    }
+  },
 ];
 
 
@@ -207,6 +221,11 @@ function App() {
   const [downwardIncludeSuperclasses, setDownwardIncludeSuperclasses] = useState(() => localStorage.getItem('ontolotree-downwardIncludeSuperclasses') !== 'false');
   const [downwardIncludeInstances, setDownwardIncludeInstances] = useState(() => localStorage.getItem('ontolotree-downwardIncludeInstances') === 'true');
   const [downwardIncludeP13359, setDownwardIncludeP13359] = useState(() => localStorage.getItem('ontolotree-downwardIncludeP13359') === 'true');
+  
+  // Edge display options
+  const [showP279Edges, setShowP279Edges] = useState(() => localStorage.getItem('ontolotree-showP279Edges') !== 'false');
+  const [showP31Edges, setShowP31Edges] = useState(() => localStorage.getItem('ontolotree-showP31Edges') === 'true');
+  const [showP13359Edges, setShowP13359Edges] = useState(() => localStorage.getItem('ontolotree-showP13359Edges') === 'true');
 
   // Pending values for inputs
   const [sampleRate, setSampleRate] = useState(() => Number(localStorage.getItem('ontolotree-sampleRate')) || 100);
@@ -286,6 +305,18 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ontolotree-downwardIncludeP13359', downwardIncludeP13359.toString());
   }, [downwardIncludeP13359]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-showP279Edges', showP279Edges.toString());
+  }, [showP279Edges]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-showP31Edges', showP31Edges.toString());
+  }, [showP31Edges]);
+
+  useEffect(() => {
+    localStorage.setItem('ontolotree-showP13359Edges', showP13359Edges.toString());
+  }, [showP13359Edges]);
 
   // Trigger initial redraw if applied settings don't match localStorage
   useEffect(() => {
@@ -746,30 +777,50 @@ function App() {
         if (!itemJson) continue;
         
         // P279 edges
-        const p279s = itemJson?.statements?.P279 || [];
-        for (const claim of p279s) {
-          const parentQid = claim.value?.content;
-          if (parentQid && nodes[parentQid]) {
-            const pid = 'P279';
-            propertyIds.add(pid);
-            const edgeKey = `${parentQid}->${qid}->${pid}`;
-            if (!edgeSet.has(edgeKey)) {
-              edges.push({ data: { source: parentQid, target: qid, property: pid } });
-              edgeSet.add(edgeKey);
+        if (showP279Edges) {
+          const p279s = itemJson?.statements?.P279 || [];
+          for (const claim of p279s) {
+            const parentQid = claim.value?.content;
+            if (parentQid && nodes[parentQid]) {
+              const pid = 'P279';
+              propertyIds.add(pid);
+              const edgeKey = `${parentQid}->${qid}->${pid}`;
+              if (!edgeSet.has(edgeKey)) {
+                edges.push({ data: { source: parentQid, target: qid, property: pid } });
+                edgeSet.add(edgeKey);
+              }
             }
           }
         }
         // P31 edges
-        const p31s = itemJson?.statements?.P31 || [];
-        for (const claim of p31s) {
-          const parentQid = claim.value?.content;
-          if (parentQid && nodes[parentQid]) {
-            const pid = 'P31';
-            propertyIds.add(pid);
-            const edgeKey = `${parentQid}->${qid}->${pid}`;
-            if (!edgeSet.has(edgeKey)) {
-              edges.push({ data: { source: parentQid, target: qid, property: pid } });
-              edgeSet.add(edgeKey);
+        if (showP31Edges) {
+          const p31s = itemJson?.statements?.P31 || [];
+          for (const claim of p31s) {
+            const parentQid = claim.value?.content;
+            if (parentQid && nodes[parentQid]) {
+              const pid = 'P31';
+              propertyIds.add(pid);
+              const edgeKey = `${parentQid}->${qid}->${pid}`;
+              if (!edgeSet.has(edgeKey)) {
+                edges.push({ data: { source: parentQid, target: qid, property: pid } });
+                edgeSet.add(edgeKey);
+              }
+            }
+          }
+        }
+        // P13359 edges
+        if (showP13359Edges) {
+          const p13359s = itemJson?.statements?.P13359 || [];
+          for (const claim of p13359s) {
+            const targetQid = claim.value?.content;
+            if (targetQid && nodes[targetQid]) {
+              const pid = 'P13359';
+              propertyIds.add(pid);
+              const edgeKey = `${qid}->${targetQid}->${pid}`;
+              if (!edgeSet.has(edgeKey)) {
+                edges.push({ data: { source: qid, target: targetQid, property: pid } });
+                edgeSet.add(edgeKey);
+              }
             }
           }
         }
@@ -1503,6 +1554,37 @@ function App() {
               <span style={{ fontSize: 14, minWidth: 30 }}>{nodeSize}</span>
             </div>
 
+            {/* Edge display options */}
+            <div style={{ marginTop: 16, marginBottom: 8 }}>
+              <label style={{ fontWeight: 'bold', display: 'block', marginBottom: 8 }}>Show Edges:</label>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={showP279Edges}
+                  onChange={e => setShowP279Edges(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Show subclass of (<a href="https://www.wikidata.org/wiki/Property:P279" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P279</a>) - default
+              </label>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={showP31Edges}
+                  onChange={e => setShowP31Edges(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Show instance of (<a href="https://www.wikidata.org/wiki/Property:P31" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P31</a>)
+              </label>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={showP13359Edges}
+                  onChange={e => setShowP13359Edges(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Show items classified (<a href="https://www.wikidata.org/wiki/Property:P13359" target="_blank" style={{ color: '#0074D9', textDecoration: 'none' }}>P13359</a>)
+              </label>
+            </div>
             {/* Graph library selection */}
             <div style={{ marginTop: 8 }}>
               <label style={{ fontWeight: 'bold', marginRight: 8 }}>Graph Library:</label>
